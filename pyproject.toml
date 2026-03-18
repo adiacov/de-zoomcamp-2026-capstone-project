@@ -1,0 +1,7 @@
+[project]
+name = "de-zoomcamp-2026-capstone-project"
+version = "0.1.0"
+description = "Data Engineering Zoomcamp 2026 Capstone Project"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
