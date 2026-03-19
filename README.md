@@ -10,4 +10,6 @@ TODO 4 - not important but nice to have (only if industry standard). Add a littl
 
 TODO 5 - read .env file. create example.env file, a file containing all env variable names without values, a file which is pushed to GIT. Also mention what to do with the example.env file in the setup section (the usual canonical way for a python project regarding .env file from sample.env file)
 
+TODO 6 - under setup section add instruction to add a google cloud service account and to create an api key. the json file (api key) should be placed in the `dev` folder at the `project root`, e.g. `project-root/dev/gcp-capstone-project-keys.json`. The dev directory name and the json file name should match the exact string in the example. This is related to actions done on the google cloud and also related to TODO 3, for terraform to be able to perform it's job.
+
 NOTE AI - IMPORTANT - START EDITING BENEATH THIS POINT. LET THE ABOVE TEXT BE AVAILABLE FOR REFERENCE
