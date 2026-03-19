@@ -1,5 +1,249 @@
+import os
+import json
+import time
+import random
+import tempfile
+import requests
+from pathlib import Path
+from zipfile import ZipFile
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import argparse
+from google.cloud import storage
+from tqdm import tqdm
+from dotenv import load_dotenv
+
+CACHE_FILE = ".ingestion_cache.json"
+
+
+# -------------------- LOG --------------------
+
+def log_info(msg):
+    print(f"[INFO] {msg}")
+
+def log_error(msg):
+    print(f"[ERROR] {msg}")
+
+
+# -------------------- RETRY --------------------
+
+def retry(fn, retries=3, base_delay=1):
+    """Simple exponential backoff retry."""
+    for i in range(retries):
+        try:
+            return fn()
+        except Exception as e:
+            if i == retries - 1:
+                raise
+            sleep = base_delay * (2**i) + random.random()
+            log_info(f"RETRY attempt={i+1} sleep={sleep:.2f}s error={e}")
+            time.sleep(sleep)
+
+
+# -------------------- GCP --------------------
+
+def get_client():
+    """Init GCS client."""
+    load_dotenv()
+    if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+        raise RuntimeError("Missing GOOGLE_APPLICATION_CREDENTIALS")
+    return storage.Client()
+
+
+# -------------------- CACHE --------------------
+
+def load_cache():
+    """Load metadata cache from disk."""
+    return json.loads(Path(CACHE_FILE).read_text()) if Path(CACHE_FILE).exists() else {}
+
+def save_cache(cache):
+    """Persist metadata cache."""
+    Path(CACHE_FILE).write_text(json.dumps(cache, indent=2))
+
+
+# -------------------- REMOTE METADATA --------------------
+
+def fetch_remote_meta(url):
+    """Fetch remote file metadata via HEAD request only."""
+    r = requests.head(url)
+    r.raise_for_status()
+    return {
+        "etag": r.headers.get("ETag"),
+        "size": int(r.headers.get("content-length", 0)),
+    }
+
+
+# -------------------- GCS METADATA --------------------
+
+def fetch_gcs_meta(bucket, prefix):
+    """
+    Return a dict of {blob_name: {size, md5}} for all blobs under prefix.
+    No data is downloaded — metadata only.
+    """
+    meta = {}
+    for blob in bucket.list_blobs(prefix=prefix):
+        meta[blob.name] = {"size": blob.size, "md5": blob.md5_hash}
+    log_info(f"GCS_META count={len(meta)}")
+    return meta
+
+
+# -------------------- DOWNLOAD (temp) --------------------
+
+def download_to_temp(url, size):
+    """
+    Download ZIP to a temporary file.
+    Caller is responsible for cleanup.
+    """
+    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    log_info(f"DOWNLOAD_START size_mb={size / 1024 / 1024:.1f} tmp={tmp.name}")
+
+    def _download():
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with tqdm(total=size, unit="B", unit_scale=True) as p:
+                for chunk in r.iter_content(1024 * 1024):
+                    if chunk:
+                        tmp.write(chunk)
+                        p.update(len(chunk))
+        tmp.flush()
+
+    retry(_download)
+    tmp.close()
+    log_info(f"DOWNLOAD_DONE tmp={tmp.name}")
+    return tmp.name
+
+
+# -------------------- GCS UPLOAD --------------------
+
+def upload(bucket, blob_path, file_obj, size):
+    """Upload with resumable chunking + retry."""
+    blob = bucket.blob(blob_path)
+    blob.chunk_size = 5 * 1024 * 1024  # 5 MB chunks
+
+    def _upload():
+        with tqdm(total=size, unit="B", unit_scale=True, desc=Path(blob_path).name) as p:
+            blob.upload_from_file(file_obj, size=size, timeout=600)
+            p.update(size)
+
+    log_info(f"UPLOAD_START file={blob_path} size_mb={size / 1024 / 1024:.1f}")
+    retry(_upload)
+    log_info(f"UPLOAD_DONE file={blob_path}")
+
+
+# -------------------- ZIP PROCESSING --------------------
+
+def process_zip(zip_path, bucket, prefix, gcs_meta, max_workers=4):
+    """
+    Extract ZIP entries and upload to GCS in parallel.
+    Skips files whose size already matches GCS metadata.
+    Thread-safe: each worker reopens the ZIP independently.
+    """
+    with ZipFile(zip_path) as z:
+        files = z.infolist()
+
+    def worker(info):
+        blob_path = f"{prefix.rstrip('/')}/{info.filename}"
+        gcs_entry = gcs_meta.get(blob_path)
+
+        if gcs_entry and gcs_entry["size"] == info.file_size:
+            log_info(f"UPLOAD_SKIP file={blob_path}")
+            return
+
+        try:
+            with ZipFile(zip_path) as z:
+                with z.open(info.filename) as f:
+                    upload(bucket, blob_path, f, info.file_size)
+        except Exception as e:
+            log_error(f"UPLOAD_FAIL file={blob_path} error={e}")
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [ex.submit(worker, f) for f in files]
+        for f in as_completed(futures):
+            f.result()
+
+
+# -------------------- MAIN PIPELINE --------------------
+
+def ingest(url, bucket_name, blob_prefix, force=False):
+    """
+    ETag-driven ingestion pipeline.
+
+    Steps:
+      1. HEAD the remote ZIP to get ETag (always — one cheap request).
+      2. Compare ETag with local cache.
+         If match and not --force → skip everything, exit early.
+      3. If ETag changed, cache missing, or --force:
+         a. List GCS blob metadata (source of truth for per-file skip logic).
+         b. Download ZIP to a temp file.
+         c. Upload only missing/changed inner files (size-based GCS check).
+         d. Update local cache with new ETag.
+         e. Delete temp ZIP file.
+
+    Repair mode (--force):
+      Bypasses the ETag check. GCS per-file size check still applies,
+      so only genuinely missing files are uploaded — no wasted bandwidth.
+    """
+    log_info("PIPELINE_START")
+    cache = load_cache()
+
+    remote_meta = retry(lambda: fetch_remote_meta(url))
+    log_info(f"REMOTE_META etag={remote_meta['etag']} size_mb={remote_meta['size'] / 1024 / 1024:.1f}")
+
+    cached = cache.get(url, {})
+    etag_match = cached.get("etag") == remote_meta["etag"]
+
+    if etag_match and not force:
+        log_info("ETAG_MATCH — nothing changed, skipping pipeline")
+        log_info("PIPELINE_DONE")
+        return
+
+    if force:
+        log_info("FORCE_MODE — bypassing cache, validating GCS state")
+
+    client = get_client()
+    bucket = client.bucket(bucket_name)
+    gcs_meta = fetch_gcs_meta(bucket, blob_prefix)
+
+    zip_path = None
+    try:
+        zip_path = download_to_temp(url, remote_meta["size"])
+        process_zip(zip_path, bucket, blob_prefix, gcs_meta)
+
+        cache[url] = {
+            "etag": remote_meta["etag"],
+            "size": remote_meta["size"],
+        }
+        save_cache(cache)
+        log_info("CACHE_UPDATED")
+
+    finally:
+        if zip_path and Path(zip_path).exists():
+            Path(zip_path).unlink()
+            log_info(f"TEMP_DELETED path={zip_path}")
+
+    log_info("PIPELINE_DONE")
+
+
+# -------------------- CLI --------------------
+
 def main():
-    print("Hello from de-zoomcamp-2026-capstone-project!")
+    parser = argparse.ArgumentParser(description="Ingest Citibike data to GCS")
+    parser.add_argument("--year", default="2024", choices=["2024", "2025"], help="Year of trip data")
+    parser.add_argument("--month", default="1", help="Month of trip data")
+    parser.add_argument("--bucket", default="de_citibike_bucket", help="GCS bucket name")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Bypass ETag cache and re-validate GCS state. Use to repair missing blobs.",
+    )
+    args = parser.parse_args()
+
+    month = args.month.zfill(2)
+    file_name = f"{args.year}{month}-citibike-tripdata.zip"
+    source_url = f"https://s3.amazonaws.com/tripdata/{file_name}"
+    blob_prefix = f"csv/{args.year}"
+
+    ingest(source_url, args.bucket, blob_prefix, force=args.force)
 
 
 if __name__ == "__main__":
