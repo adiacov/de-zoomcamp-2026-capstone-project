@@ -9,18 +9,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-RAW_TABLE = "citibike_trips_raw"
+RAW_TABLE = "trips"
 META_TABLE = "_loaded_files"
 
 # -------------------- LOG --------------------
 
+
 def log_info(msg):
     print(f"[INFO] {msg}")
+
 
 def log_error(msg):
     print(f"[ERROR] {msg}")
 
+
 # -------------------- RETRY --------------------
+
 
 def retry(fn, retries=3, base_delay=1):
     """Simple exponential backoff retry."""
@@ -34,17 +38,22 @@ def retry(fn, retries=3, base_delay=1):
             log_info(f"RETRY attempt={i+1} sleep={sleep:.2f}s error={e}")
             time.sleep(sleep)
 
+
 # -------------------- GCP --------------------
+
 
 def get_bq_client():
     """Init BigQuery client."""
     return bigquery.Client()
 
+
 def get_gcs_client():
     """Init GCS client."""
     return storage.Client()
 
+
 # -------------------- METADATA --------------------
+
 
 def ensure_meta_table(bq, dataset):
     """Create _loaded_files table if it doesn't exist."""
@@ -57,6 +66,7 @@ def ensure_meta_table(bq, dataset):
     bq.create_table(table, exists_ok=True)
     log_info(f"META_TABLE_READY table={table_ref}")
 
+
 def load_loaded_uris(bq, dataset):
     """Return set of GCS URIs already loaded."""
     query = f"SELECT gcs_uri FROM `{bq.project}.{dataset}.{META_TABLE}`"
@@ -64,6 +74,7 @@ def load_loaded_uris(bq, dataset):
     uris = {row.gcs_uri for row in rows}
     log_info(f"ALREADY_LOADED count={len(uris)}")
     return uris
+
 
 def mark_loaded(bq, dataset, gcs_uri):
     """Record a successfully loaded URI into _loaded_files."""
@@ -74,25 +85,27 @@ def mark_loaded(bq, dataset, gcs_uri):
         raise RuntimeError(f"Failed to mark URI as loaded: {errors}")
     log_info(f"META_MARKED uri={gcs_uri}")
 
+
 # -------------------- BQ TABLE --------------------
+
 
 def ensure_raw_table(bq, dataset):
     """Create citibike_trips_raw partitioned by day on started_at if not exists."""
     table_ref = f"{bq.project}.{dataset}.{RAW_TABLE}"
     schema = [
-        bigquery.SchemaField("ride_id",             "STRING"),
-        bigquery.SchemaField("rideable_type",        "STRING"),
-        bigquery.SchemaField("started_at",           "TIMESTAMP"),
-        bigquery.SchemaField("ended_at",             "TIMESTAMP"),
-        bigquery.SchemaField("start_station_name",   "STRING"),
-        bigquery.SchemaField("start_station_id",     "STRING"),
-        bigquery.SchemaField("end_station_name",     "STRING"),
-        bigquery.SchemaField("end_station_id",       "STRING"),
-        bigquery.SchemaField("start_lat",            "FLOAT"),
-        bigquery.SchemaField("start_lng",            "FLOAT"),
-        bigquery.SchemaField("end_lat",              "FLOAT"),
-        bigquery.SchemaField("end_lng",              "FLOAT"),
-        bigquery.SchemaField("member_casual",        "STRING"),
+        bigquery.SchemaField("ride_id", "STRING"),
+        bigquery.SchemaField("rideable_type", "STRING"),
+        bigquery.SchemaField("started_at", "TIMESTAMP"),
+        bigquery.SchemaField("ended_at", "TIMESTAMP"),
+        bigquery.SchemaField("start_station_name", "STRING"),
+        bigquery.SchemaField("start_station_id", "STRING"),
+        bigquery.SchemaField("end_station_name", "STRING"),
+        bigquery.SchemaField("end_station_id", "STRING"),
+        bigquery.SchemaField("start_lat", "FLOAT"),
+        bigquery.SchemaField("start_lng", "FLOAT"),
+        bigquery.SchemaField("end_lat", "FLOAT"),
+        bigquery.SchemaField("end_lng", "FLOAT"),
+        bigquery.SchemaField("member_casual", "STRING"),
     ]
     partitioning = bigquery.TimePartitioning(
         type_=bigquery.TimePartitioningType.DAY,
@@ -103,7 +116,9 @@ def ensure_raw_table(bq, dataset):
     bq.create_table(table, exists_ok=True)
     log_info(f"RAW_TABLE_READY table={table_ref}")
 
+
 # -------------------- GCS --------------------
+
 
 def list_gcs_blobs(gcs, bucket_name, prefix):
     """List all CSV blob URIs under the given prefix."""
@@ -116,7 +131,9 @@ def list_gcs_blobs(gcs, bucket_name, prefix):
     log_info(f"GCS_BLOBS_FOUND count={len(blobs)} prefix={prefix}")
     return blobs
 
+
 # -------------------- LOAD --------------------
+
 
 def load_uri(bq, dataset, gcs_uri):
     """Run a BigQuery load job for a single GCS URI."""
@@ -144,7 +161,9 @@ def load_uri(bq, dataset, gcs_uri):
 
     retry(_load)
 
+
 # -------------------- MAIN PIPELINE --------------------
+
 
 def load(bucket, dataset, prefix):
     """End-to-end load pipeline."""
@@ -171,17 +190,27 @@ def load(bucket, dataset, prefix):
 
     log_info("LOAD_PIPELINE_DONE")
 
+
 # -------------------- CLI ENTRY --------------------
+
 
 def main():
     if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
         raise RuntimeError("Missing GOOGLE_APPLICATION_CREDENTIALS")
 
-    parser = argparse.ArgumentParser(description="Load Citibike CSVs from GCS into BigQuery")
-    parser.add_argument("--year",    default="2024", choices=["2024", "2025"], help="Year of trip data")
-    parser.add_argument("--month",   default="1",    help="Month of trip data")
-    parser.add_argument("--bucket",  default="de_citibike_bucket",            help="GCS bucket name")
-    parser.add_argument("--dataset", default="de_citibike_dataset",           help="BigQuery dataset name")
+    parser = argparse.ArgumentParser(
+        description="Load Citibike CSVs from GCS into BigQuery"
+    )
+    parser.add_argument(
+        "--year", default="2024", choices=["2024", "2025"], help="Year of trip data"
+    )
+    parser.add_argument("--month", default="1", help="Month of trip data")
+    parser.add_argument(
+        "--bucket", default="de_citibike_bucket", help="GCS bucket name"
+    )
+    parser.add_argument(
+        "--dataset", default="de_citibike_raw", help="BigQuery dataset name"
+    )
     args = parser.parse_args()
 
     month = args.month.zfill(2)
@@ -192,6 +221,7 @@ def main():
         dataset=args.dataset,
         prefix=prefix,
     )
+
 
 if __name__ == "__main__":
     main()
