@@ -183,7 +183,7 @@ def ingest(url, bucket_name, blob_prefix, force=False):
       Bypasses the ETag check. GCS per-file size check still applies,
       so only genuinely missing files are uploaded — no wasted bandwidth.
     """
-    log_info("PIPELINE_START")
+    log_info("INGEST_PIPELINE_START")
     cache = load_cache()
 
     remote_meta = retry(lambda: fetch_remote_meta(url))
@@ -221,7 +221,7 @@ def ingest(url, bucket_name, blob_prefix, force=False):
             Path(zip_path).unlink()
             log_info(f"TEMP_DELETED path={zip_path}")
 
-    log_info("PIPELINE_DONE")
+    log_info("INGEST_PIPELINE_DONE")
 
 
 # -------------------- CLI --------------------

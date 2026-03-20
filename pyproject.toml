@@ -5,6 +5,7 @@ description = "Data Engineering Zoomcamp 2026 Capstone Project"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "google-cloud-bigquery>=3.40.1",
     "google-cloud-storage>=3.9.0",
     "python-dotenv>=1.2.2",
     "requests>=2.32.5",
