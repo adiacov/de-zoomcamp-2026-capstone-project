@@ -36,8 +36,20 @@ resource "google_storage_bucket" "de_citibike_bucket" {
   force_destroy = true
 }
 
-resource "google_bigquery_dataset" "de_citibike_dataset" {
-  dataset_id = var.bq_dataset_name
+resource "google_bigquery_dataset" "de_citibike_raw_dataset" {
+  dataset_id = var.citibike_raw_dataset_name
+  project    = var.project
+  location   = var.location
+}
+
+resource "google_bigquery_dataset" "de_citibike_staging_dataset" {
+  dataset_id = var.citibike_staging_dataset_name
+  project    = var.project
+  location   = var.location
+}
+
+resource "google_bigquery_dataset" "de_citibike_marts_dataset" {
+  dataset_id = var.citibike_marts_dataset_name
   project    = var.project
   location   = var.location
 }

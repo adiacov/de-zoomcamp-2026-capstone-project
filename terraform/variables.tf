@@ -28,7 +28,17 @@ variable "gcs_class" {
   default     = "STANDARD"
 }
 
-variable "bq_dataset_name" {
-  description = "DE bigquery dataset name"
-  default     = "de_citibike_dataset"
+variable "citibike_raw_dataset_name" {
+  description = "DE bigquery dataset for raw data"
+  default     = "de_citibike_raw"
+}
+
+variable "citibike_staging_dataset_name" {
+  description = "DE bigquery dataset for staging data"
+  default     = "de_citibike_staging"
+}
+
+variable "citibike_marts_dataset_name" {
+  description = "DE bigquery dataset for mart data"
+  default     = "de_citibike_marts"
 }
