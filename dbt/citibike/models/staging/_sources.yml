@@ -1,0 +1,8 @@
+sources:
+  - name: de_citibike_raw
+    description: "Citibike source dataset"
+    schema: de_citibike_raw
+    tables:
+      - name: trips
+        description: "Citibike table"
+        identifier: trips
