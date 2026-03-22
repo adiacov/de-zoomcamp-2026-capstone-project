@@ -1,0 +1,52 @@
+models:
+  - name: stg_trips
+    columns:
+      - name: ride_id
+        data_tests:
+          - not_null
+          - unique
+
+      - name: rideable_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ["classic_bike", "electric_bike"]
+
+      - name: ride_start_time
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: TIMESTAMP('2024-01-01')
+
+      - name: ride_end_time
+        data_tests:
+          - not_null
+
+      - name: ride_start_lat
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: -90
+              max_value: 90
+
+      - name: ride_start_lng
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: -180
+              max_value: 180
+
+      - name: ride_end_lat
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: -90
+              max_value: 90
+
+      - name: ride_end_lng
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: -180
+              max_value: 180
+
+      - name: customer_type
+        data_tests:
+          - accepted_values:
+              values: ["member", "casual"]

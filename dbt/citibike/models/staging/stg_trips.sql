@@ -6,7 +6,8 @@ with raw as (
 filtered as (
     select *
     from raw
-    where started_at >= CAST('2024-01-01' AS TIMESTAMP) -- the dataset in this project starts from January 2024
+    where 
+        started_at >= CAST('2024-01-01' AS TIMESTAMP) -- the dataset in this project starts from January 2024
 ),
 
 transformed as (
