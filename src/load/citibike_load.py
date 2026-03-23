@@ -2,13 +2,14 @@ import os
 import time
 import random
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from google.cloud import bigquery, storage
 from dotenv import load_dotenv
 
 load_dotenv()
 
+RAW_TABLE_TEMP = "trips_temp"
 RAW_TABLE = "trips"
 META_TABLE = "_loaded_files"
 
@@ -106,6 +107,7 @@ def ensure_raw_table(bq, dataset):
         bigquery.SchemaField("end_lat", "FLOAT"),
         bigquery.SchemaField("end_lng", "FLOAT"),
         bigquery.SchemaField("member_casual", "STRING"),
+        bigquery.SchemaField("_loaded_at", "TIMESTAMP"),
     ]
     partitioning = bigquery.TimePartitioning(
         type_=bigquery.TimePartitioningType.DAY,
@@ -115,6 +117,32 @@ def ensure_raw_table(bq, dataset):
     table.time_partitioning = partitioning
     bq.create_table(table, exists_ok=True)
     log_info(f"RAW_TABLE_READY table={table_ref}")
+
+
+def ensure_temp_raw_table(bq, dataset):
+    """Create citibike_trips_temp_raw if not exists."""
+    table_ref = f"{bq.project}.{dataset}.{RAW_TABLE_TEMP}"
+    schema = [
+        bigquery.SchemaField("ride_id", "STRING"),
+        bigquery.SchemaField("rideable_type", "STRING"),
+        bigquery.SchemaField("started_at", "TIMESTAMP"),
+        bigquery.SchemaField("ended_at", "TIMESTAMP"),
+        bigquery.SchemaField("start_station_name", "STRING"),
+        bigquery.SchemaField("start_station_id", "STRING"),
+        bigquery.SchemaField("end_station_name", "STRING"),
+        bigquery.SchemaField("end_station_id", "STRING"),
+        bigquery.SchemaField("start_lat", "FLOAT"),
+        bigquery.SchemaField("start_lng", "FLOAT"),
+        bigquery.SchemaField("end_lat", "FLOAT"),
+        bigquery.SchemaField("end_lng", "FLOAT"),
+        bigquery.SchemaField("member_casual", "STRING"),
+    ]
+    table = bigquery.Table(table_ref, schema=schema)
+    table.expires = datetime.now(timezone.utc) + timedelta(
+        hours=1
+    )  # keep temp table for 1 hour
+    bq.create_table(table, exists_ok=True)
+    log_info(f"TEMP_RAW_TABLE_READY table={table_ref}")
 
 
 # -------------------- GCS --------------------
@@ -132,25 +160,21 @@ def list_gcs_blobs(gcs, bucket_name, prefix):
     return blobs
 
 
-# -------------------- LOAD --------------------
+# -------------------- LOAD TEMP --------------------
 
 
 def load_uri(bq, dataset, gcs_uri):
-    """Run a BigQuery load job for a single GCS URI."""
-    table_ref = f"{bq.project}.{dataset}.{RAW_TABLE}"
+    """Run a BigQuery load job for a single GCS URI to a temporary table."""
+    table_ref = f"{bq.project}.{dataset}.{RAW_TABLE_TEMP}"
     job_config = bigquery.LoadJobConfig(
         source_format=bigquery.SourceFormat.CSV,
         skip_leading_rows=1,
         autodetect=False,
-        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
         schema_update_options=[],
-        time_partitioning=bigquery.TimePartitioning(
-            type_=bigquery.TimePartitioningType.DAY,
-            field="started_at",
-        ),
     )
 
-    log_info(f"LOAD_START uri={gcs_uri}")
+    log_info(f"TEMP_LOAD_START uri={gcs_uri}")
 
     def _load():
         job = bq.load_table_from_uri(gcs_uri, table_ref, job_config=job_config)
@@ -160,6 +184,41 @@ def load_uri(bq, dataset, gcs_uri):
         log_info(f"LOAD_DONE uri={gcs_uri} rows={job.output_rows}")
 
     retry(_load)
+
+
+# -------------------- TRANSFER TEMP TO RAW --------------------
+
+
+def transfer_temp_to_raw(bq, dataset):
+    """Run a BigQuery copy temp trips table to raw target table.
+    This step add additional meta columns, e.g. _loaded_at.
+    """
+    table_ref_temp = f"{bq.project}.{dataset}.{RAW_TABLE_TEMP}"
+    table_ref_raw = f"{bq.project}.{dataset}.{RAW_TABLE}"
+
+    log_info(
+        f"TRANSFER_TEMP_TO_RAW_START from table_ref_temp={table_ref_temp} to table_ref_raw={table_ref_raw}"
+    )
+
+    def _insert_select():
+        query = f"""
+            INSERT INTO `{table_ref_raw}`
+            SELECT 
+                *,
+                CURRENT_TIMESTAMP() AS _loaded_at
+            FROM `{table_ref_temp}`
+        """
+
+        job = bq.query(query=query)
+        job.result()  # wait for completion
+        if job.errors:
+            raise RuntimeError(f"Transfer job errors: {job.errors}")
+
+        log_info(
+            f"TRANSFER_TEMP_TO_RAW_DONE from table_ref_temp={table_ref_temp} to table_ref_raw={table_ref_raw} rows={job.num_dml_affected_rows}"
+        )
+
+    retry(_insert_select)
 
 
 # -------------------- MAIN PIPELINE --------------------
@@ -173,6 +232,7 @@ def load(bucket, dataset, prefix):
     gcs = get_gcs_client()
 
     ensure_meta_table(bq, dataset)
+    ensure_temp_raw_table(bq, dataset)
     ensure_raw_table(bq, dataset)
 
     already_loaded = load_loaded_uris(bq, dataset)
@@ -184,6 +244,7 @@ def load(bucket, dataset, prefix):
     for uri in pending:
         try:
             load_uri(bq, dataset, uri)
+            transfer_temp_to_raw(bq, dataset)
             mark_loaded(bq, dataset, uri)
         except Exception as e:
             log_error(f"LOAD_FAIL uri={uri} error={e}")
