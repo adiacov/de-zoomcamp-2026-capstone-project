@@ -1,0 +1,80 @@
+models:
+  - name: mart_trips_by_hour
+    description: "Citibike trips by hour"
+
+    # Grain: a trip count per day, per hour, per customer_type, per rideable_type
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - trip_date
+              - trip_hour
+              - customer_type
+              - rideable_type
+
+    columns:
+      - name: trip_date
+        data_tests:
+          - not_null
+
+      - name: trip_hour
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 23
+
+      - name: customer_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["member", "casual"]
+
+      - name: rideable_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["classic_bike", "electric_bike"]
+
+      - name: trip_count
+        data_tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+
+  - name: mart_trips_by_day_type
+    description: "Citibike trips by day type"
+
+    # Grain: a trip count per day type (weekday, weekend), per customer_type, per rideable_type
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - day_type
+              - customer_type
+              - rideable_type
+
+    columns:
+      - name: day_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["weekday", "weekend"]
+
+      - name: customer_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["member", "casual"]
+
+      - name: rideable_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["classic_bike", "electric_bike"]
+
+      - name: trip_count
+        data_tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
