@@ -226,7 +226,7 @@ def transfer_temp_to_raw(bq, dataset):
 
 def load(bucket, dataset, prefix):
     """End-to-end load pipeline."""
-    log_info("LOAD_PIPELINE_START")
+    log_info(f"LOAD_PIPELINE_START: {prefix}")
 
     bq = get_bq_client()
     gcs = get_gcs_client()
@@ -250,6 +250,23 @@ def load(bucket, dataset, prefix):
             log_error(f"LOAD_FAIL uri={uri} error={e}")
 
     log_info("LOAD_PIPELINE_DONE")
+
+
+# -------------------- APP ENTRY --------------------
+def run_load(
+    year: str,
+    month: str,
+    bucket: str,
+    dataset: str,
+):
+    month = str(month).zfill(2)
+    prefix = f"csv/{str(year)}/{str(year)}{month}-citibike-tripdata"
+
+    load(
+        bucket=bucket,
+        dataset=dataset,
+        prefix=prefix,
+    )
 
 
 # -------------------- CLI ENTRY --------------------

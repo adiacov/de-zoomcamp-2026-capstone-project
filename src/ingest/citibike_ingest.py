@@ -18,14 +18,17 @@ CACHE_FILE = ".ingestion_cache.json"
 
 # -------------------- LOG --------------------
 
+
 def log_info(msg):
     print(f"[INFO] {msg}")
+
 
 def log_error(msg):
     print(f"[ERROR] {msg}")
 
 
 # -------------------- RETRY --------------------
+
 
 def retry(fn, retries=3, base_delay=1):
     """Simple exponential backoff retry."""
@@ -42,6 +45,7 @@ def retry(fn, retries=3, base_delay=1):
 
 # -------------------- GCP --------------------
 
+
 def get_client():
     """Init GCS client."""
     load_dotenv()
@@ -52,9 +56,11 @@ def get_client():
 
 # -------------------- CACHE --------------------
 
+
 def load_cache():
     """Load metadata cache from disk."""
     return json.loads(Path(CACHE_FILE).read_text()) if Path(CACHE_FILE).exists() else {}
+
 
 def save_cache(cache):
     """Persist metadata cache."""
@@ -62,6 +68,7 @@ def save_cache(cache):
 
 
 # -------------------- REMOTE METADATA --------------------
+
 
 def fetch_remote_meta(url):
     """Fetch remote file metadata via HEAD request only."""
@@ -74,6 +81,7 @@ def fetch_remote_meta(url):
 
 
 # -------------------- GCS METADATA --------------------
+
 
 def fetch_gcs_meta(bucket, prefix):
     """
@@ -88,6 +96,7 @@ def fetch_gcs_meta(bucket, prefix):
 
 
 # -------------------- DOWNLOAD (temp) --------------------
+
 
 def download_to_temp(url, size):
     """
@@ -115,13 +124,16 @@ def download_to_temp(url, size):
 
 # -------------------- GCS UPLOAD --------------------
 
+
 def upload(bucket, blob_path, file_obj, size):
     """Upload with resumable chunking + retry."""
     blob = bucket.blob(blob_path)
     blob.chunk_size = 5 * 1024 * 1024  # 5 MB chunks
 
     def _upload():
-        with tqdm(total=size, unit="B", unit_scale=True, desc=Path(blob_path).name) as p:
+        with tqdm(
+            total=size, unit="B", unit_scale=True, desc=Path(blob_path).name
+        ) as p:
             blob.upload_from_file(file_obj, size=size, timeout=600)
             p.update(size)
 
@@ -131,6 +143,7 @@ def upload(bucket, blob_path, file_obj, size):
 
 
 # -------------------- ZIP PROCESSING --------------------
+
 
 def process_zip(zip_path, bucket, prefix, gcs_meta, max_workers=4):
     """
@@ -164,6 +177,7 @@ def process_zip(zip_path, bucket, prefix, gcs_meta, max_workers=4):
 
 # -------------------- MAIN PIPELINE --------------------
 
+
 def ingest(url, bucket_name, blob_prefix, force=False):
     """
     ETag-driven ingestion pipeline.
@@ -183,11 +197,13 @@ def ingest(url, bucket_name, blob_prefix, force=False):
       Bypasses the ETag check. GCS per-file size check still applies,
       so only genuinely missing files are uploaded — no wasted bandwidth.
     """
-    log_info("INGEST_PIPELINE_START")
+    log_info(f"INGEST_PIPELINE_START: {url}")
     cache = load_cache()
 
     remote_meta = retry(lambda: fetch_remote_meta(url))
-    log_info(f"REMOTE_META etag={remote_meta['etag']} size_mb={remote_meta['size'] / 1024 / 1024:.1f}")
+    log_info(
+        f"REMOTE_META etag={remote_meta['etag']} size_mb={remote_meta['size'] / 1024 / 1024:.1f}"
+    )
 
     cached = cache.get(url, {})
     etag_match = cached.get("etag") == remote_meta["etag"]
@@ -224,13 +240,33 @@ def ingest(url, bucket_name, blob_prefix, force=False):
     log_info("INGEST_PIPELINE_DONE")
 
 
+# -------------------- APP --------------------
+def run_ingest(
+    year: str,
+    month: str,
+    bucket: str,
+    force: bool = False,
+):
+    month = str(month).zfill(2)
+    file_name = f"{str(year)}{month}-citibike-tripdata.zip"
+    source_url = f"https://s3.amazonaws.com/tripdata/{file_name}"
+    blob_prefix = f"csv/{str(year)}"
+
+    ingest(source_url, bucket, blob_prefix, force)
+
+
 # -------------------- CLI --------------------
+
 
 def main():
     parser = argparse.ArgumentParser(description="Ingest Citibike data to GCS")
-    parser.add_argument("--year", default="2024", choices=["2024", "2025"], help="Year of trip data")
+    parser.add_argument(
+        "--year", default="2024", choices=["2024", "2025"], help="Year of trip data"
+    )
     parser.add_argument("--month", default="1", help="Month of trip data")
-    parser.add_argument("--bucket", default="de_citibike_bucket", help="GCS bucket name")
+    parser.add_argument(
+        "--bucket", default="de_citibike_bucket", help="GCS bucket name"
+    )
     parser.add_argument(
         "--force",
         action="store_true",
