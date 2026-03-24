@@ -78,3 +78,110 @@ models:
           - dbt_utils.expression_is_true:
               arguments:
                 expression: ">= 0"
+
+  - name: mart_station_activity
+    description: "Top 10 stations activity (start / end)"
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - station_name
+              - station_role
+
+    columns:
+      - name: station_name
+        data_tests:
+          - not_null
+
+      - name: station_role
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["start", "end"]
+
+      - name: trip_count
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+
+  - name: mart_trips_by_month
+    description: "Trips by month. Grain: trips by year + month + customer_type + rideable_type."
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - year
+              - month
+              - customer_type
+              - rideable_type
+
+    columns:
+      - name: year
+        data_tests:
+          - not_null
+
+      - name: month
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 12
+
+      - name: customer_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["casual", "member"]
+
+      - name: rideable_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["classic_bike", "electric_bike"]
+
+  - name: mart_avg_duration_by_customer
+    description: "Average trip duration in seconds by customer rideable_type."
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - customer_type
+              - rideable_type
+
+    columns:
+      - name: customer_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["casual", "member"]
+
+      - name: rideable_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["classic_bike", "electric_bike"]
+
+      - name: avg_trip_duration_minutes
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+
+      - name: median_trip_duration_minutes
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
