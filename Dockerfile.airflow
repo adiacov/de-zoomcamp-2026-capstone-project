@@ -1,0 +1,16 @@
+FROM apache/airflow:3.1.8
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+USER root
+COPY pyproject.toml /opt/airflow/
+COPY README.md /opt/airflow/
+
+COPY uv.lock /opt/airflow/
+COPY src/ /opt/airflow/src
+COPY dbt/ /opt/airflow/dbt
+
+USER airflow
+WORKDIR /opt/airflow
+
+RUN VIRTUAL_ENV="" uv sync --locked
