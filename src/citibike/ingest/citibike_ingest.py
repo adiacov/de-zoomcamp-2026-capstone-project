@@ -46,11 +46,23 @@ def retry(fn, retries=3, base_delay=1):
 # -------------------- GCP --------------------
 
 
-def get_client():
-    """Init GCS client."""
-    load_dotenv()
+def ensure_environment():
+    """Ensures important env vars are set."""
+
+    environment = os.environ.get("ENVIRONMENT")
+    if environment == "container":
+        # Container environment. Env vars are set in the docker.
+        log_info("Fetching GOOGLE_APPLICATION_CREDENTIALS in container environment.")
+    else:
+        log_info("Fetching GOOGLE_APPLICATION_CREDENTIALS locally.")
+        load_dotenv()
+
     if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
         raise RuntimeError("Missing GOOGLE_APPLICATION_CREDENTIALS")
+
+
+def get_client():
+    """Init GCS client."""
     return storage.Client()
 
 
@@ -247,6 +259,8 @@ def run_ingest(
     bucket: str,
     force: bool = False,
 ):
+    ensure_environment()
+
     month = str(month).zfill(2)
     file_name = f"{str(year)}{month}-citibike-tripdata.zip"
     source_url = f"https://s3.amazonaws.com/tripdata/{file_name}"
@@ -259,6 +273,8 @@ def run_ingest(
 
 
 def main():
+    ensure_environment()
+
     parser = argparse.ArgumentParser(description="Ingest Citibike data to GCS")
     parser.add_argument(
         "--year", default="2024", choices=["2024", "2025"], help="Year of trip data"
