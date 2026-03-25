@@ -1,0 +1,14 @@
+citibike:
+  target: dev
+  outputs:
+    dev:
+      dataset: de_citibike_raw # fallback only; rarely used
+      job_execution_timeout_seconds: 300
+      job_retries: 1
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS') }}"
+      location: EU
+      method: service-account
+      priority: interactive
+      project: "{{ env_var('GCP_PROJECT_ID') }}"
+      threads: 4
+      type: bigquery

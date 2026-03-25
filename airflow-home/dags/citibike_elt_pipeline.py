@@ -1,31 +1,106 @@
-from airflow.sdk import dag, task
+"""Citibike ELT pipeline.
+
+This DAG orchestrates a simple ELT workflow for Citibike trip data:
+1. Ingest: Download monthly CSV (ZIP) files and upload them to GCS.
+2. Load: Load data from GCS into BigQuery (partitioned tables).
+3. Transform: Run DBT models to transform raw data.
+4. Test: Execute DBT tests to validate transformed models.
+
+All steps are parameterized and share the same runtime configuration.
+"""
+
+from airflow.sdk import DAG, Param, task
+from citibike.ingest.citibike_ingest import run_ingest
+from citibike.load.citibike_load import run_load
+from pathlib import Path
 
 
-@dag(
-    dag_id="citibike_elt_pipeline",
-    description="Citibike ELT pipeline.",
+param_year = Param(
+    default="2024",
+    description="Year of the Citibike dataset to process. Used in both ingest and load steps.",
+    title="Year",
+    type="string",
+    enum=[f"{year}" for year in range(2024, 2026)],
+)
+
+param_month = Param(
+    default="1",
+    description="Month of the Citibike dataset to process (1–12). Used in both ingest and load steps.",
+    title="Month",
+    type="string",
+    enum=[f"{month}" for month in range(1, 13)],
+)
+
+param_bucket = Param(
+    default="de_citibike_bucket",
+    description="GCS bucket used for storing ingested raw files and as the source for loading.",
+    title="GCS Bucket",
+    type="string",
+)
+
+param_dataset = Param(
+    default="de_citibike_raw",
+    description="Target BigQuery dataset where raw data will be loaded.",
+    title="BigQuery Dataset",
+    type="string",
+)
+
+param_force_ingest = Param(
+    default=False,
+    description="If True, overwrites existing files in GCS. Useful for recovery or reprocessing.",
+    title="Force Re-ingestion",
+    type="boolean",
+)
+
+
+with DAG(
+    dag_id=Path(__file__).stem,
+    dag_display_name="Citibike ELT Pipeline",
+    description=__doc__.partition("\n")[0],
+    doc_md=__doc__,
     schedule=None,
     catchup=False,
     tags=["citibike", "elt", "pipeline"],
-)
-def citibike_elt_pipeline():
-    """
-    ### Citibike ELT pipeline.
+    params={
+        "year": param_year,
+        "month": param_month,
+        "bucket": param_bucket,
+        "dataset": param_dataset,
+        "force_ingest": param_force_ingest,
+    },
+) as dag:
 
-    Ingest (download CSV ZIP - to GCS) ->
-    Load (GCS -> BigQuery) ->
-    DBT run (modeling) ->
-    DBT test (test models)
-    """
-
-    @task()
-    def test_task():
-        print(
-            "THIS IS A TEST TASK. CHECK DAG EXECUTION FOR CONFIRMATION THAT IT WORKS."
+    @task(task_id="run_ingest", task_display_name="Ingest")
+    def run_ingest_task(params=None) -> None:
+        """Download Citibike data for the given period and upload it to GCS."""
+        run_ingest(
+            params["year"], params["month"], params["bucket"], params["force_ingest"]
         )
 
-    # Task flow
-    test_task()
+    @task(task_id="run_load", task_display_name="Load")
+    def run_load_task(params=None) -> None:
+        """Load ingested data from GCS into BigQuery."""
+        run_load(params["year"], params["month"], params["bucket"], params["dataset"])
 
+    @task.bash(
+        task_id="create_dbt_models",
+        task_display_name="DBT Models",
+        cwd="/opt/airflow/dbt/",
+    )
+    def run_dbt_models() -> str:
+        """Execute DBT models to transform raw data into analytics-ready tables."""
+        return "dbt run --project-dir /opt/airflow/dbt/citibike --profiles-dir /opt/airflow/dbt/citibike"
 
-citibike_elt_pipeline()
+    @task.bash(
+        task_id="run_dbt_tests", task_display_name="DBT Tests", cwd="/opt/airflow/dbt/"
+    )
+    def run_dbt_tests() -> str:
+        """Run DBT tests to validate data quality and model assumptions."""
+        return "dbt test --project-dir /opt/airflow/dbt/citibike --profiles-dir /opt/airflow/dbt/citibike"
+
+    ingest = run_ingest_task()
+    load = run_load_task()
+    dbt_run = run_dbt_models()
+    dbt_test = run_dbt_tests()
+
+    ingest >> load >> dbt_run >> dbt_test

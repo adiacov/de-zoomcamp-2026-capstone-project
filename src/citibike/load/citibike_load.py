@@ -3,6 +3,8 @@ import time
 import random
 import argparse
 from datetime import datetime, timezone, timedelta
+import tempfile
+import json
 
 from google.cloud import bigquery, storage
 from dotenv import load_dotenv
@@ -41,6 +43,21 @@ def retry(fn, retries=3, base_delay=1):
 
 
 # -------------------- GCP --------------------
+
+
+def ensure_environment():
+    """Ensures important env vars are set."""
+
+    environment = os.environ.get("ENVIRONMENT")
+    if environment == "container":
+        # Container environment. Env vars are set in the docker.
+        log_info("Fetching GOOGLE_APPLICATION_CREDENTIALS in container environment.")
+    else:
+        log_info("Fetching GOOGLE_APPLICATION_CREDENTIALS locally.")
+        load_dotenv()
+
+    if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+        raise RuntimeError("Missing GOOGLE_APPLICATION_CREDENTIALS")
 
 
 def get_bq_client():
@@ -259,6 +276,8 @@ def run_load(
     bucket: str,
     dataset: str,
 ):
+    ensure_environment()
+
     month = str(month).zfill(2)
     prefix = f"csv/{str(year)}/{str(year)}{month}-citibike-tripdata"
 
@@ -293,6 +312,8 @@ def main():
 
     month = args.month.zfill(2)
     prefix = f"csv/{args.year}/{args.year}{month}-citibike-tripdata"
+
+    ensure_environment()
 
     load(
         bucket=args.bucket,
