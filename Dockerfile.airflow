@@ -18,29 +18,51 @@ COPY dbt/ ./dbt/
 # Copy GCP API Keys (not best practice. simplified for the capstone project.)
 COPY dev/gcp-capstone-project-keys.json /opt/airflow/dev/gcp-capstone-project-keys.json
 
-# Install the package system-wide
-ENV VIRTUAL_ENV=/opt/airflow/.venv
-ENV PATH="/opt/airflow/.venv/bin:$PATH"
-RUN uv sync --python 3.12
-RUN uv pip install --no-cache .
+# ------------------------------
+# Install only non-dbt dependencies into Airflow's Python
+# to avoid protobuf conflict between dbt-core and Airflow
+# ------------------------------
+RUN uv pip install --no-cache --system \
+    "google-cloud-bigquery>=3.0.0" \
+    "google-cloud-storage>=2.4.0" \
+    "python-dotenv>=1.2.2" \
+    "requests>=2.32.5" \
+    "stream-unzip>=0.0.101" \
+    "tqdm>=4.67.3"
 
-# Install dbt packages
-RUN dbt deps --project-dir /opt/airflow/dbt/citibike --profiles-dir /opt/airflow/dbt/citibike
+# Install the citibike package itself without pulling in dbt dependencies
+RUN uv pip install --no-cache --system --no-deps -e .
 
-# Drop privileges — never run Airflow as root
-USER airflow
+# ------------------------------
+# Isolated dbt venv — fully separate from Airflow's Python
+# Prevents protobuf version conflict (dbt needs protobuf>=6, Airflow pins its own)
+# google-cloud-* included here to ensure dbt-bigquery adapter has aligned deps
+# ------------------------------
+RUN python -m venv /opt/dbt-venv \
+    && /opt/dbt-venv/bin/pip install --no-cache-dir \
+    "dbt-bigquery>=1.11.1" \
+    "dbt-core>=1.11.7" \
+    "google-cloud-bigquery>=3.0.0" \
+    "google-cloud-storage>=2.4.0"
+
+# Install dbt packages using the isolated venv
+RUN /opt/dbt-venv/bin/dbt deps \
+    --project-dir /opt/airflow/dbt/citibike \
+    --profiles-dir /opt/airflow/dbt/citibike
+
+# ------------------------------
+# Ingestion cache directory
+# The airflow user writes the cache here at runtime (path set via CITIBIKE_CACHE).
+# save_cache() creates the file on first write — no need to touch it here.
+# ------------------------------
+ENV CITIBIKE_CACHE=/opt/airflow/.cache/.ingestion_cache.json
+RUN mkdir -p /opt/airflow/.cache && chown -R airflow:0 /opt/airflow/.cache
 
 # ------------------------------
 # Enable uv cache
 # ------------------------------
 ENV UV_CACHE_DIR=/opt/airflow/.uv_cache
-RUN mkdir -p /opt/airflow/.uv_cache && chmod -R 777 /opt/airflow/.uv_cache
+RUN mkdir -p /opt/airflow/.uv_cache && chown -R airflow:0 /opt/airflow/.uv_cache
 
-# ------------------------------
-# Enable ingestion temp/cache files
-# Ensures Python code can create temp files and ingestion cache
-# ------------------------------
-ENV CITIBIKE_CACHE=/opt/airflow/.cache/.ingestion_cache.json
-RUN mkdir -p /opt/airflow/.cache && \
-    touch /opt/airflow/.cache/.ingestion_cache.json && \
-    chmod -R 777 /opt/airflow/.cache
+# Drop privileges — never run Airflow as root
+USER airflow

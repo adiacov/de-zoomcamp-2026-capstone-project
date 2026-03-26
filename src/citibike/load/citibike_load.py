@@ -3,13 +3,9 @@ import time
 import random
 import argparse
 from datetime import datetime, timezone, timedelta
-import tempfile
-import json
 
 from google.cloud import bigquery, storage
 from dotenv import load_dotenv
-
-load_dotenv()
 
 RAW_TABLE_TEMP = "trips_temp"
 RAW_TABLE = "trips"
@@ -292,8 +288,7 @@ def run_load(
 
 
 def main():
-    if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-        raise RuntimeError("Missing GOOGLE_APPLICATION_CREDENTIALS")
+    ensure_environment()
 
     parser = argparse.ArgumentParser(
         description="Load Citibike CSVs from GCS into BigQuery"

@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import random
@@ -12,8 +13,6 @@ import argparse
 from google.cloud import storage
 from tqdm import tqdm
 from dotenv import load_dotenv
-
-CACHE_FILE = ".ingestion_cache.json"
 
 
 # -------------------- LOG --------------------
@@ -69,14 +68,39 @@ def get_client():
 # -------------------- CACHE --------------------
 
 
-def load_cache():
+def _cache_path() -> Path:
+    """
+    Resolve cache file path.
+    Precedence:
+      1. CITIBIKE_CACHE env var  (set in container via Docker/Compose)
+      2. Project root  (local dev — walks up from this file to find pyproject.toml)
+      3. Fallback: next to this source file
+    """
+    env_path = os.environ.get("CITIBIKE_CACHE")
+    if env_path:
+        return Path(env_path)
+
+    # Local: anchor to project root (where pyproject.toml lives)
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "pyproject.toml").exists():
+            return parent / ".ingestion_cache.json"
+
+    # Fallback: next to this file
+    return here.parent / ".ingestion_cache.json"
+
+
+def load_cache() -> dict:
     """Load metadata cache from disk."""
-    return json.loads(Path(CACHE_FILE).read_text()) if Path(CACHE_FILE).exists() else {}
+    p = _cache_path()
+    return json.loads(p.read_text()) if p.exists() else {}
 
 
-def save_cache(cache):
+def save_cache(cache: dict) -> None:
     """Persist metadata cache."""
-    Path(CACHE_FILE).write_text(json.dumps(cache, indent=2))
+    p = _cache_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(cache, indent=2))
 
 
 # -------------------- REMOTE METADATA --------------------
@@ -121,7 +145,12 @@ def download_to_temp(url, size):
     def _download():
         with requests.get(url, stream=True) as r:
             r.raise_for_status()
-            with tqdm(total=size, unit="B", unit_scale=True) as p:
+            with tqdm(
+                total=size,
+                unit="B",
+                unit_scale=True,
+                file=sys.stdout,
+            ) as p:
                 for chunk in r.iter_content(1024 * 1024):
                     if chunk:
                         tmp.write(chunk)
@@ -144,7 +173,11 @@ def upload(bucket, blob_path, file_obj, size):
 
     def _upload():
         with tqdm(
-            total=size, unit="B", unit_scale=True, desc=Path(blob_path).name
+            total=size,
+            unit="B",
+            unit_scale=True,
+            desc=Path(blob_path).name,
+            file=sys.stdout,
         ) as p:
             blob.upload_from_file(file_obj, size=size, timeout=600)
             p.update(size)
