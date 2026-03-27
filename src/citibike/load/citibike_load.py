@@ -290,7 +290,7 @@ def run_load(
     month: str,
     bucket: str,
     dataset: str,
-):
+) -> bool:
     ensure_environment()
 
     month = str(month).zfill(2)

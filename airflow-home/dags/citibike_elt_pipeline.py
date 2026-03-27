@@ -74,9 +74,9 @@ with DAG(
         task_id="run_ingest",
         task_display_name="Ingest",
     )
-    def run_ingest_task(params=None) -> None:
+    def run_ingest_task(params=None) -> bool:
         """Download Citibike data for the given period and upload it to GCS."""
-        run_ingest(
+        return run_ingest(
             params["year"], params["month"], params["bucket"], params["force_ingest"]
         )
 
@@ -84,9 +84,11 @@ with DAG(
         task_id="run_load",
         task_display_name="Load",
     )
-    def run_load_task(params=None) -> None:
+    def run_load_task(params=None) -> bool:
         """Load ingested data from GCS into BigQuery."""
-        run_load(params["year"], params["month"], params["bucket"], params["dataset"])
+        return run_load(
+            params["year"], params["month"], params["bucket"], params["dataset"]
+        )
 
     @task.bash(
         task_id="create_dbt_models",
@@ -104,9 +106,24 @@ with DAG(
         """Run DBT tests to validate data quality and model assumptions."""
         return "/opt/dbt-venv/bin/dbt test --project-dir /opt/airflow/dbt/citibike --profiles-dir /opt/airflow/dbt/citibike"
 
-    ingest = run_ingest_task()
-    load = run_load_task()
+    @task.short_circuit(
+        task_id="should_run_dbt",
+        task_display_name="Should Run DBT",
+    )
+    def should_run_dbt(is_ingested: bool, is_loaded: bool) -> bool:
+        """Checks if ingest OR load did real work.
+
+        Returns:
+        False - no real work was done (no new files downloaded to bucket, or no new raw dataset created).
+        True - real work was done (new files downloaded to bucket, or new dataset created).
+        """
+        return is_ingested or is_loaded
+
+    is_ingested = run_ingest_task()
+    is_loaded = run_load_task()
     dbt_run = run_dbt_models()
     dbt_test = run_dbt_tests()
 
-    ingest >> load >> dbt_run >> dbt_test
+    is_ingested >> is_loaded
+    is_more_work = should_run_dbt(is_ingested, is_loaded)
+    is_more_work >> dbt_run >> dbt_test

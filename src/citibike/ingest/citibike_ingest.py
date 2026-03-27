@@ -296,7 +296,7 @@ def run_ingest(
     month: str,
     bucket: str,
     force: bool = False,
-):
+) -> bool:
     ensure_environment()
 
     month = str(month).zfill(2)
@@ -304,7 +304,7 @@ def run_ingest(
     source_url = f"https://s3.amazonaws.com/tripdata/{file_name}"
     blob_prefix = f"csv/{str(year)}"
 
-    ingest(source_url, bucket, blob_prefix, force)
+    return ingest(source_url, bucket, blob_prefix, force)
 
 
 # -------------------- CLI --------------------
@@ -333,7 +333,7 @@ def main():
     source_url = f"https://s3.amazonaws.com/tripdata/{file_name}"
     blob_prefix = f"csv/{args.year}"
 
-    return ingest(source_url, args.bucket, blob_prefix, force=args.force)
+    ingest(source_url, args.bucket, blob_prefix, force=args.force)
 
 
 if __name__ == "__main__":
