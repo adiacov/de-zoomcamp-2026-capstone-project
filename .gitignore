@@ -575,6 +575,7 @@ dev/registry/providers.json
 
 # CUSTOM
 
+.env
 dev/*
 data/*
 .ingestion_cache.json

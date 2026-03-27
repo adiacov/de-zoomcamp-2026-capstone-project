@@ -1,6 +1,6 @@
 variable "credentials" {
   description = "Terraform runner service account keys"
-  default     = "../dev/gcp-capstone-project-keys.json"
+  default     = "../dev/credentials.json"
 }
 
 variable "project" {

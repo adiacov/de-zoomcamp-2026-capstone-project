@@ -12,13 +12,13 @@ TODO 4 - not important but nice to have (only if industry standard). Add a littl
 
 TODO 5 - read .env file. create example.env file, a file containing all env variable names without values, a file which is pushed to GIT. Also mention what to do with the example.env file in the setup section (the usual canonical way for a python project regarding .env file from sample.env file)
 
-TODO 6 - under setup section add instruction to add a google cloud service account and to create an api key. the json file (api key) should be placed in the `dev` folder at the `project root`, e.g. `project-root/dev/gcp-capstone-project-keys.json`. The dev directory name and the json file name should match the exact string in the example. This is related to actions done on the google cloud and also related to TODO 3, for terraform to be able to perform it's job.
+TODO 6 - under setup section add instruction to add a google cloud service account and to create an api key. the json file (api key) should be placed in the `dev` folder at the `project root`, e.g. `project-root/dev/credentials.json`. The dev directory name and the json file name should match the exact string in the example. This is related to actions done on the google cloud and also related to TODO 3, for terraform to be able to perform it's job.
 
 TODO 7 - this project uses GCP. In setup add a step which sets GOOGLE_APPLICATION_CREDENTIALS , which points to the account service api key json file (related to TODO 3).
 
-TODO 8 - in setup section (control it), create a dev/ directory, create a json file named gcp-capstone-project-keys.json, paste the contents of the account service json key. This is needed for airflow running in docker (simplest way for capstone project).
+TODO 8 - in setup section (control it), create a dev/ directory, create a json file named credentials.json, paste the contents of the account service json key. This is needed for airflow running in docker (simplest way for capstone project).
 
-TODO 9 - in airflow while running as a docker container, set an environment variable named GOOGLE_APPLICATION_CREDENTIALS with value  /opt/airflow/dev/gcp-capstone-project-keys.json (check Dockerfile.airflow). This way airflow will use it to connect to GCP. (related to TODO 6, may be combined or reworked).
+TODO 9 - in airflow while running as a docker container, set an environment variable named GOOGLE_APPLICATION_CREDENTIALS with value  /opt/airflow/dev/credentials.json (check Dockerfile.airflow). This way airflow will use it to connect to GCP. (related to TODO 6, may be combined or reworked).
 
 TODO 10 - refactor ingestion. See dev/refactor-ingestion.txt (not for AI).
 

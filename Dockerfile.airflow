@@ -15,9 +15,6 @@ COPY pyproject.toml uv.lock README.md ./
 COPY src/ ./src/
 COPY dbt/ ./dbt/
 
-# Copy GCP API Keys (not best practice. simplified for the capstone project.)
-COPY dev/gcp-capstone-project-keys.json /opt/airflow/dev/gcp-capstone-project-keys.json
-
 # ------------------------------
 # Install only non-dbt dependencies into Airflow's Python
 # to avoid protobuf conflict between dbt-core and Airflow

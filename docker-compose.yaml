@@ -55,7 +55,7 @@ x-airflow-common:
     context: .
     dockerfile: Dockerfile.airflow
   env_file:
-    - ${ENV_FILE_PATH:-.env}
+    - .env.docker
   environment: &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
@@ -76,7 +76,6 @@ x-airflow-common:
     _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
     # The following line can be used to set a custom config file, stored in the local config folder
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
-    ENVIRONMENT: container
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
@@ -85,6 +84,7 @@ x-airflow-common:
     # Persist ingestion cache across container restarts — mirrors local dev behaviour.
     # The .cache dir is gitignored; create it locally with: mkdir -p .cache
     - ${AIRFLOW_PROJ_DIR:-.}/.cache:/opt/airflow/.cache
+    - ./dev/credentials.json:/opt/gcp/credentials.json:ro
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on: &airflow-common-depends-on
     postgres:
