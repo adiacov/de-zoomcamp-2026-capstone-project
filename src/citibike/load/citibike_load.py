@@ -237,8 +237,23 @@ def transfer_temp_to_raw(bq, dataset):
 # -------------------- MAIN PIPELINE --------------------
 
 
-def load(bucket, dataset, prefix):
-    """End-to-end load pipeline."""
+def load(bucket, dataset, prefix) -> bool:
+    """Load new CSV files from GCS into BigQuery.
+
+    Lists all CSV blobs under the given prefix, compares them against
+    previously loaded files tracked in `_loaded_files`, and loads only
+    new ones. Each file is staged in a temporary table before being
+    inserted into the partitioned raw table with a `_loaded_at` timestamp.
+
+    Args:
+        bucket: GCS bucket name.
+        dataset: BigQuery dataset name.
+        prefix: GCS path prefix to filter CSV blobs.
+
+    Returns:
+        True if at least one new file was loaded, False if all files
+        were already processed.
+    """
     log_info(f"LOAD_PIPELINE_START: {prefix}")
 
     bq = get_bq_client()
@@ -254,6 +269,9 @@ def load(bucket, dataset, prefix):
     pending = [uri for uri in all_uris if uri not in already_loaded]
     log_info(f"PENDING count={len(pending)}")
 
+    if not pending:
+        return False
+
     for uri in pending:
         try:
             load_uri(bq, dataset, uri)
@@ -263,6 +281,7 @@ def load(bucket, dataset, prefix):
             log_error(f"LOAD_FAIL uri={uri} error={e}")
 
     log_info("LOAD_PIPELINE_DONE")
+    return True
 
 
 # -------------------- APP ENTRY --------------------
@@ -277,11 +296,7 @@ def run_load(
     month = str(month).zfill(2)
     prefix = f"csv/{str(year)}/{str(year)}{month}-citibike-tripdata"
 
-    load(
-        bucket=bucket,
-        dataset=dataset,
-        prefix=prefix,
-    )
+    return load(bucket=bucket, dataset=dataset, prefix=prefix)
 
 
 # -------------------- CLI ENTRY --------------------

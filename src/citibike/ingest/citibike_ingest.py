@@ -223,7 +223,7 @@ def process_zip(zip_path, bucket, prefix, gcs_meta, max_workers=4):
 # -------------------- MAIN PIPELINE --------------------
 
 
-def ingest(url, bucket_name, blob_prefix, force=False):
+def ingest(url, bucket_name, blob_prefix, force=False) -> bool:
     """
     ETag-driven ingestion pipeline.
 
@@ -241,6 +241,9 @@ def ingest(url, bucket_name, blob_prefix, force=False):
     Repair mode (--force):
       Bypasses the ETag check. GCS per-file size check still applies,
       so only genuinely missing files are uploaded — no wasted bandwidth.
+
+    Returns:
+        True if new data was downloaded, False if skipped
     """
     log_info(f"INGEST_PIPELINE_START: {url}")
     cache = load_cache()
@@ -256,7 +259,7 @@ def ingest(url, bucket_name, blob_prefix, force=False):
     if etag_match and not force:
         log_info("ETAG_MATCH — nothing changed, skipping pipeline")
         log_info("PIPELINE_DONE")
-        return
+        return False
 
     if force:
         log_info("FORCE_MODE — bypassing cache, validating GCS state")
@@ -283,6 +286,8 @@ def ingest(url, bucket_name, blob_prefix, force=False):
             log_info(f"TEMP_DELETED path={zip_path}")
 
     log_info("INGEST_PIPELINE_DONE")
+
+    return True
 
 
 # -------------------- APP --------------------
@@ -328,7 +333,7 @@ def main():
     source_url = f"https://s3.amazonaws.com/tripdata/{file_name}"
     blob_prefix = f"csv/{args.year}"
 
-    ingest(source_url, args.bucket, blob_prefix, force=args.force)
+    return ingest(source_url, args.bucket, blob_prefix, force=args.force)
 
 
 if __name__ == "__main__":

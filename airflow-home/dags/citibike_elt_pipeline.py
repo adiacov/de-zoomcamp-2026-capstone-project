@@ -73,7 +73,6 @@ with DAG(
     @task(
         task_id="run_ingest",
         task_display_name="Ingest",
-        map_index_template="{{ params.year }}-{{ params.month }}",
     )
     def run_ingest_task(params=None) -> None:
         """Download Citibike data for the given period and upload it to GCS."""
@@ -84,7 +83,6 @@ with DAG(
     @task(
         task_id="run_load",
         task_display_name="Load",
-        map_index_template="{{ params.year }}-{{ params.month }}",
     )
     def run_load_task(params=None) -> None:
         """Load ingested data from GCS into BigQuery."""
@@ -93,10 +91,6 @@ with DAG(
     @task.bash(
         task_id="create_dbt_models",
         task_display_name="DBT Models",
-        env={
-            "GCP_PROJECT_ID": "{{ var.value.GCP_PROJECT_ID }}",
-            "GOOGLE_APPLICATION_CREDENTIALS": "{{ var.value.GOOGLE_APPLICATION_CREDENTIALS }}",
-        },
     )
     def run_dbt_models() -> str:
         """Execute DBT models to transform raw data into analytics-ready tables."""
@@ -105,10 +99,6 @@ with DAG(
     @task.bash(
         task_id="run_dbt_tests",
         task_display_name="DBT Tests",
-        env={
-            "GCP_PROJECT_ID": "{{ var.value.GCP_PROJECT_ID }}",
-            "GOOGLE_APPLICATION_CREDENTIALS": "{{ var.value.GOOGLE_APPLICATION_CREDENTIALS }}",
-        },
     )
     def run_dbt_tests() -> str:
         """Run DBT tests to validate data quality and model assumptions."""
