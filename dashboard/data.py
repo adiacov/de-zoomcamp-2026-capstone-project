@@ -9,15 +9,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-# GPC_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "UNKNOWN")
-
-# client = bigquery.Client(project=GPC_PROJECT_ID)
 client = bigquery.Client()
 
 
 def _make_mart_table_name(table_name: str) -> str:
     """Returns table name in the citibike marts"""
-    # project = GPC_PROJECT_ID
     project = client.project
     return f"`{project}.de_citibike_marts.{table_name}`"
 
