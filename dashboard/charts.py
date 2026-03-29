@@ -176,7 +176,7 @@ def chart_trips_by_hour(df: pd.DataFrame) -> Figure:
     t = _get_theme()
 
     df = (
-        df.filter(["trip_hour", "trip_count", "customer_type"])
+        df[["trip_hour", "trip_count", "customer_type"]]
         .groupby(["trip_hour", "customer_type"], as_index=False)
         .sum()
     )
@@ -224,7 +224,7 @@ def chart_trips_by_month(df: pd.DataFrame) -> Figure:
     t = _get_theme()
 
     df = (
-        df.filter(["year", "month", "trip_count", "customer_type"])
+        df[["year", "month", "trip_count", "customer_type"]]
         .groupby(["year", "month", "customer_type"], as_index=False)
         .sum()
     )
