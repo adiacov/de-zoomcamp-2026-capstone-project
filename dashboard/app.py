@@ -1,4 +1,4 @@
-import streamlit as st
+import dashboard as st
 
 # Total Trips — from mart_trips_by_month
 # Avg Trip Duration — from mart_avg_duration_by_customer
