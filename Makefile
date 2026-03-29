@@ -7,4 +7,4 @@ load:
 	@uv run -m citibike.load.citibike_load --month 2024 --month 1 --bucket de_citibike_bucket --dataset de_citibike_raw
 
 streamlit-run:
-	@streamlit run streamlit/streamlit_app.py
+	@streamlit run streamlit/app.py
