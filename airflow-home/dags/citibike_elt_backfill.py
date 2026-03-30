@@ -120,7 +120,7 @@ with DAG(
     )
     def run_ingest_task(period: dict, params=None) -> None:
         """Download Citibike data for the given period and upload it to GCS."""
-        run_ingest(
+        return run_ingest(
             period["year"], period["month"], params["bucket"], params["force_ingest"]
         )
 
@@ -131,7 +131,9 @@ with DAG(
     )
     def run_load_task(period: dict, params=None) -> None:
         """Load ingested data from GCS into BigQuery."""
-        run_load(period["year"], period["month"], params["bucket"], params["dataset"])
+        return run_load(
+            period["year"], period["month"], params["bucket"], params["dataset"]
+        )
 
     @task.bash(
         task_id="dbt_deps",
@@ -144,10 +146,6 @@ with DAG(
     @task.bash(
         task_id="create_dbt_models",
         task_display_name="DBT Models",
-        env={
-            "GCP_PROJECT_ID": "{{ var.value.GCP_PROJECT_ID }}",
-            "GOOGLE_APPLICATION_CREDENTIALS": "{{ var.value.GOOGLE_APPLICATION_CREDENTIALS }}",
-        },
     )
     def run_dbt_models() -> str:
         """Execute DBT models to transform raw data into analytics-ready tables."""
@@ -156,21 +154,28 @@ with DAG(
     @task.bash(
         task_id="run_dbt_tests",
         task_display_name="DBT Tests",
-        env={
-            "GCP_PROJECT_ID": "{{ var.value.GCP_PROJECT_ID }}",
-            "GOOGLE_APPLICATION_CREDENTIALS": "{{ var.value.GOOGLE_APPLICATION_CREDENTIALS }}",
-        },
     )
     def run_dbt_tests() -> str:
         """Run DBT tests to validate data quality and model assumptions."""
         return "/opt/dbt-venv/bin/dbt test --project-dir /opt/airflow/dbt/citibike --profiles-dir /opt/airflow/dbt/citibike"
 
-    periods = generate_periods()
+    @task.short_circuit(
+        task_id="should_run_dbt",
+        task_display_name="Should Run DBT",
+    )
+    def should_run_dbt(ingest_results: list[bool], load_results: list[bool]) -> bool:
+        """Run DBT if any ingest or load tasks did any work."""
+        return any(ingest_results) or any(load_results)
 
-    ingest = run_ingest_task.expand(period=periods)
-    load = run_load_task.expand(period=periods)
+    periods = generate_periods()
+    is_any_ingested = run_ingest_task.expand(period=periods)
+    is_any_loaded = run_load_task.expand(period=periods)
+
     dbt_deps = run_dbt_deps()
     dbt_run = run_dbt_models()
     dbt_test = run_dbt_tests()
 
-    ingest >> load >> dbt_deps >> dbt_run >> dbt_test
+    # DAG RUN
+    is_any_ingested >> is_any_loaded
+    is_more_work = should_run_dbt(is_any_ingested, is_any_loaded)
+    is_more_work >> dbt_deps >> dbt_run >> dbt_test

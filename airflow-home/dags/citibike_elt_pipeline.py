@@ -141,6 +141,7 @@ with DAG(
     dbt_run = run_dbt_models()
     dbt_test = run_dbt_tests()
 
+    #  DAG RUN
     is_ingested >> is_loaded
     is_more_work = should_run_dbt(is_ingested, is_loaded)
     is_more_work >> dbt_deps >> dbt_run >> dbt_test

@@ -178,36 +178,22 @@ Enable the following APIs in your project:
 
 Terraform provisions the GCS bucket and BigQuery datasets. Run this **once** before starting Docker.
 
-### 1. Set your unique prefix in `variables.tf`
+### 1. Set your project ID and prefix in your `.env` files
 
-Open `terraform/variables.tf` and update two variables — your GCP project ID, and a prefix that will be used to name all GCP resources:
+Before running Terraform, make sure `GCP_PROJECT_ID` and `GCP_PREFIX` are set in your `.env` file (see [Local Setup](#local-setup)). Terraform reads these values directly from your environment.
 
-```hcl
-variable "project" {
-  description = "DE Course project ID"
-  default     = "your-gcp-project-id"    # ← replace this
-}
-
-variable "prefix" {
-  description = "Unique prefix for all GCP resource names"
-  default     = "your-prefix"            # ← replace this (e.g. your name or project ID)
-}
-```
-
-The `prefix` is used to construct resource names automatically:
+`GCP_PREFIX` is used to construct all GCP resource names automatically:
 
 | Resource | Name |
 |---|---|
-| GCS bucket | `{prefix}-citibike-bucket` |
-| BigQuery dataset (raw) | `{prefix}_citibike_raw` |
-| BigQuery dataset (staging) | `{prefix}_citibike_staging` |
-| BigQuery dataset (marts) | `{prefix}_citibike_marts` |
+| GCS bucket | `{GCP_PREFIX}-citibike-bucket` |
+| BigQuery dataset (raw) | `{GCP_PREFIX}_citibike_raw` |
+| BigQuery dataset (staging) | `{GCP_PREFIX}_citibike_staging` |
+| BigQuery dataset (marts) | `{GCP_PREFIX}_citibike_marts` |
 
-> **Why a prefix?** GCS bucket names are globally unique across all of Google Cloud. A project-specific prefix (e.g., your GCP project ID) guarantees your bucket name won't collide with anyone else's.
+> **Why a prefix?** GCS bucket names are globally unique across all of Google Cloud — a bucket named `citibike-bucket` almost certainly already exists in someone else's project. Prefixing with your GCP project ID or another unique identifier guarantees no collision. BigQuery dataset names are scoped to your project and don't have this problem, but the prefix is applied consistently everywhere for clarity.
 
-> **Note on bucket names:** GCS bucket names cannot contain underscores, so the bucket uses a hyphen (`-`) while BigQuery datasets use underscores (`_`). This is handled automatically in `variables.tf`.
-
-These are the **only two values you need to change** in the entire Terraform configuration.
+> **Note on bucket names:** GCS bucket names cannot contain underscores. The bucket name uses a hyphen (`-`) while BigQuery datasets use underscores (`_`). This is handled automatically in `variables.tf`.
 
 ### 2. Provision infrastructure
 
@@ -218,15 +204,7 @@ make tf-apply
 
 Review the plan and type `yes` to confirm. Terraform will create the GCS bucket and all three BigQuery datasets.
 
-### 3. Update your bucket name in `.env.docker`
-
-Once Terraform completes, update the bucket name in `.env.docker` to match what was created:
-
-```dotenv
-GCS_BUCKET_NAME=your-prefix-citibike-bucket
-```
-
-And in the Airflow DAG parameters at trigger time, use the same bucket name (see [Running the Pipeline](#running-the-pipeline)).
+Once Terraform completes, use the bucket name `{GCP_PREFIX}-citibike-bucket` when setting DAG parameters at trigger time (see [Running the Pipeline](#running-the-pipeline)).
 
 ---
 
@@ -245,13 +223,14 @@ cd de-zoomcamp-2026-capstone-project
 cp sample.env .env
 ```
 
-Open `.env` and set your GCP project ID — this is the only value you need to change:
+Open `.env` and fill in the two marked values:
 
 ```dotenv
 ##### GCP #####
 GOOGLE_APPLICATION_CREDENTIALS=dev/credentials.json
-GCP_PROJECT_ID=your-gcp-project-id    # ← set this
-
+GCP_PROJECT_ID=<gcp project id>    # ← your GCP project ID
+GCP_PREFIX=<gcp prefix>            # ← unique prefix for all GCP resource names
+                                   #   (e.g. your GCP project ID)
 ##### AIRFLOW #####
 AIRFLOW_PROJ_DIR=./airflow-home
 AIRFLOW_UID=1000
@@ -261,12 +240,13 @@ This file is used for local development only (running scripts locally, Terraform
 
 ### 3. Configure the Docker environment file
 
-Open `.env.docker` and set your GCP project ID — again, the only value you need to change:
+Open `.env.docker` and fill in the two marked values:
 
 ```dotenv
 ##### GCP #####
 GOOGLE_APPLICATION_CREDENTIALS=/opt/gcp/credentials.json   # container path — do not change
-GCP_PROJECT_ID=your-gcp-project-id    # ← set this
+GCP_PROJECT_ID=<gcp project id>    # ← your GCP project ID
+GCP_PREFIX=<gcp prefix>            # ← same value as in .env
 ```
 
 `.env.docker` is committed to git and contains no secrets. The credentials JSON is injected into containers at runtime via a Docker volume mount (`dev/credentials.json` → `/opt/gcp/credentials.json`, read-only).
@@ -322,10 +302,10 @@ Processes a single month of Citibike data end-to-end.
 **Task flow:**
 
 ```
-run_ingest → run_load → should_run_dbt → create_dbt_models → run_dbt_tests
+run_ingest → run_load → should_run_dbt → install_dbt_deps → create_dbt_models → run_dbt_tests
 ```
 
-`should_run_dbt` is a short-circuit gate: if neither ingest nor load produced new data, the dbt steps are skipped entirely.
+`should_run_dbt` is a short-circuit gate: if neither ingest nor load produced new data, the dbt steps (including `install_dbt_deps`) are skipped entirely.
 
 **Parameters:**
 
@@ -348,7 +328,7 @@ Processes a range of months in a single run. Use this for historical loads, not 
 **Task flow:**
 
 ```
-generate_periods → run_ingest (mapped) → run_load (mapped) → create_dbt_models → run_dbt_tests
+generate_periods → run_ingest (mapped) → run_load (mapped) → install_dbt_deps → create_dbt_models → run_dbt_tests
 ```
 
 Ingest and load tasks are dynamically mapped — one task instance is created per month in the specified range.
