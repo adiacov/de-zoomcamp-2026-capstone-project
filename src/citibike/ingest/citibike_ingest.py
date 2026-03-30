@@ -58,6 +58,8 @@ def ensure_environment():
 
     if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
         raise RuntimeError("Missing GOOGLE_APPLICATION_CREDENTIALS")
+    if not os.getenv("GCP_PREFIX"):
+        raise RuntimeError("Missing GCP_PREFIX")
 
 
 def get_client():
@@ -312,6 +314,7 @@ def run_ingest(
 
 def main():
     ensure_environment()
+    GCP_PREFIX = os.getenv("GCP_PREFIX")
 
     parser = argparse.ArgumentParser(description="Ingest Citibike data to GCS")
     parser.add_argument(
@@ -319,7 +322,7 @@ def main():
     )
     parser.add_argument("--month", default="1", help="Month of trip data")
     parser.add_argument(
-        "--bucket", default="de_citibike_bucket", help="GCS bucket name"
+        "--bucket", default=f"{GCP_PREFIX}_citibike_bucket", help="GCS bucket name"
     )
     parser.add_argument(
         "--force",

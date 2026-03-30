@@ -54,6 +54,8 @@ def ensure_environment():
 
     if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
         raise RuntimeError("Missing GOOGLE_APPLICATION_CREDENTIALS")
+    if not os.getenv("GCP_PREFIX"):
+        raise RuntimeError("Missing GCP_PREFIX")
 
 
 def get_bq_client():
@@ -304,6 +306,7 @@ def run_load(
 
 def main():
     ensure_environment()
+    GCP_PREFIX = os.getenv("GCP_PREFIX")
 
     parser = argparse.ArgumentParser(
         description="Load Citibike CSVs from GCS into BigQuery"
@@ -313,10 +316,10 @@ def main():
     )
     parser.add_argument("--month", default="1", help="Month of trip data")
     parser.add_argument(
-        "--bucket", default="de_citibike_bucket", help="GCS bucket name"
+        "--bucket", default=f"{GCP_PREFIX}_citibike_bucket", help="GCS bucket name"
     )
     parser.add_argument(
-        "--dataset", default="de_citibike_raw", help="BigQuery dataset name"
+        "--dataset", default=f"{GCP_PREFIX}_citibike_raw", help="BigQuery dataset name"
     )
     args = parser.parse_args()
 

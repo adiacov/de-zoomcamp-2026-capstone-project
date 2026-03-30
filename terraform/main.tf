@@ -14,7 +14,7 @@ provider "google" {
 }
 
 resource "google_storage_bucket" "de_citibike_bucket" {
-  name     = var.gcs_bucket_name
+  name     = local.gcs_bucket_name
   location = var.location
 
   storage_class               = var.gcs_class
@@ -33,23 +33,39 @@ resource "google_storage_bucket" "de_citibike_bucket" {
     }
   }
 
-  force_destroy = true
+  force_destroy = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_bigquery_dataset" "de_citibike_raw_dataset" {
-  dataset_id = var.citibike_raw_dataset_name
+  dataset_id = local.citibike_raw_dataset_name
   project    = var.project
   location   = var.location
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_bigquery_dataset" "de_citibike_staging_dataset" {
-  dataset_id = var.citibike_staging_dataset_name
+  dataset_id = local.citibike_staging_dataset_name
   project    = var.project
   location   = var.location
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_bigquery_dataset" "de_citibike_marts_dataset" {
-  dataset_id = var.citibike_marts_dataset_name
+  dataset_id = local.citibike_marts_dataset_name
   project    = var.project
   location   = var.location
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }

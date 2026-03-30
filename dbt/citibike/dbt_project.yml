@@ -30,7 +30,7 @@ models:
     # Materialize staging models as views, and marts as tables
     staging:
       +materialized: view
-      +schema: de_citibike_staging
+      +schema: "{{ env_var('GCP_PREFIX') }}_citibike_staging"
     marts:
       +materialized: table
-      +schema: de_citibike_marts
+      +schema: "{{ env_var('GCP_PREFIX') }}_citibike_marts"

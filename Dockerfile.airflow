@@ -42,11 +42,6 @@ RUN python -m venv /opt/dbt-venv \
     "google-cloud-bigquery>=3.0.0" \
     "google-cloud-storage>=2.4.0"
 
-# Install dbt packages using the isolated venv
-RUN /opt/dbt-venv/bin/dbt deps \
-    --project-dir /opt/airflow/dbt/citibike \
-    --profiles-dir /opt/airflow/dbt/citibike
-
 # ------------------------------
 # Ingestion cache directory
 # The airflow user writes the cache here at runtime (path set via CITIBIKE_CACHE).

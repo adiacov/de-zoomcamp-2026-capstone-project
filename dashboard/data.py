@@ -4,16 +4,24 @@ import pandas as pd
 from google.cloud import bigquery
 from dotenv import load_dotenv
 
+import os
+
 load_dotenv()
 
 
 client = bigquery.Client()
 
+GCP_PREFIX = os.getenv("GCP_PREFIX")
+if not GCP_PREFIX:
+    raise RuntimeError(
+        "Environment variable GCP_PREFIX is not set. Dashboard DATA step cannot proceed."
+    )
+
 
 def _make_mart_table_name(table_name: str) -> str:
     """Returns table name in the citibike marts"""
     project = client.project
-    return f"`{project}.de_citibike_marts.{table_name}`"
+    return f"`{project}.{GCP_PREFIX}_citibike_marts.{table_name}`"
 
 
 @st.cache_data

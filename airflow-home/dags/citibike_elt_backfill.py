@@ -7,11 +7,19 @@ The DAG is intended for historical reprocessing and bulk loads,
 not for scheduled monthly updates.
 """
 
+import os
+
 from airflow.sdk import DAG, Param, task
 from datetime import datetime
 from pathlib import Path
 from citibike.ingest.citibike_ingest import run_ingest
 from citibike.load.citibike_load import run_load
+
+GCP_PREFIX = os.getenv("GCP_PREFIX")
+if not GCP_PREFIX:
+    raise RuntimeError(
+        "Environment variable GCP_PREFIX is not set. DAG cannot proceed."
+    )
 
 
 param_start_year = Param(
@@ -47,14 +55,14 @@ param_end_month = Param(
 )
 
 param_bucket = Param(
-    default="de_citibike_bucket",
+    default=f"{GCP_PREFIX}_citibike_bucket",
     description="GCS bucket used for storing ingested raw files and as the source for loading.",
     title="GCS Bucket",
     type="string",
 )
 
 param_dataset = Param(
-    default="de_citibike_raw",
+    default=f"{GCP_PREFIX}_citibike_raw",
     description="Target BigQuery dataset where raw data will be loaded.",
     title="BigQuery Dataset",
     type="string",
@@ -126,6 +134,14 @@ with DAG(
         run_load(period["year"], period["month"], params["bucket"], params["dataset"])
 
     @task.bash(
+        task_id="dbt_deps",
+        task_display_name="DBT Dependencies",
+    )
+    def run_dbt_deps() -> str:
+        """Install dbt packages in the isolated venv."""
+        return "/opt/dbt-venv/bin/dbt deps --project-dir /opt/airflow/dbt/citibike --profiles-dir /opt/airflow/dbt/citibike"
+
+    @task.bash(
         task_id="create_dbt_models",
         task_display_name="DBT Models",
         env={
@@ -153,7 +169,8 @@ with DAG(
 
     ingest = run_ingest_task.expand(period=periods)
     load = run_load_task.expand(period=periods)
+    dbt_deps = run_dbt_deps()
     dbt_run = run_dbt_models()
     dbt_test = run_dbt_tests()
 
-    ingest >> load >> dbt_run >> dbt_test
+    ingest >> load >> dbt_deps >> dbt_run >> dbt_test
