@@ -282,5 +282,18 @@ services:
     depends_on:
       <<: *airflow-common-depends-on
 
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: streamlit
+    env_file:
+      - .env.docker
+    volumes:
+      - ./dev/credentials.json:/opt/gcp/credentials.json:ro
+    ports:
+      - "8501:8501"
+    restart: always
+
 volumes:
   postgres-db-volume:

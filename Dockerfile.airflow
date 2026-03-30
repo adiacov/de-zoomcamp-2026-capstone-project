@@ -28,7 +28,7 @@ RUN uv pip install --no-cache --system \
     "tqdm>=4.67.3"
 
 # Install the citibike package itself without pulling in dbt dependencies
-RUN uv pip install --no-cache --system --no-deps -e .
+RUN uv pip install --no-cache --system --no-deps .
 
 # ------------------------------
 # Isolated dbt venv — fully separate from Airflow's Python
