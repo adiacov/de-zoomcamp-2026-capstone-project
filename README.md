@@ -1,29 +1,457 @@
-# Data Engineering Zoomcamp 2026 Capstone Project
+# Citibike NYC — End-to-End Data Pipeline
 
-## WORK IN PROGRESS
+An end-to-end data engineering project built for the [Data Engineering Zoomcamp 2026](https://github.com/DataTalksClub/data-engineering-zoomcamp). It ingests Citibike NYC trip data from the public S3 source, loads it into BigQuery, transforms it with dbt, orchestrates the pipeline with Airflow, and visualises the results in a Streamlit dashboard — all running in Docker.
 
-TODO 1 - create a generic description and add important sections. The source and scope of the project are described here: <https://github.com/DataTalksClub/data-engineering-zoomcamp/tree/main/projects>
+---
 
-TODO 2 - besides the TODO 1 with general description, all the important standard industry sections should be included with short and comprehensive information on how to: setup, build, run, deploy, etc
+## Table of Contents
 
-TODO 3 - check the terraform folder, check the main.tf and variables.tf files. Based on this, the user who will use current project, need to setup a Google Cloud Account, an account service (current project uses a single account service - for simplicity). The service account should have permissions to work with GCS - BigQuery Admin, Storage Admin. This part I believe belongs to the setup section (correct if it's not true).
+- [Problem Statement](#problem-statement)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Dataset](#dataset)
+- [Project Structure](#project-structure)
+- [Prerequisites](#prerequisites)
+- [GCP Setup](#gcp-setup)
+- [Infrastructure Setup (Terraform)](#infrastructure-setup-terraform)
+- [Local Setup](#local-setup)
+- [Running the Pipeline](#running-the-pipeline)
+- [Airflow DAGs](#airflow-dags)
+- [dbt Models](#dbt-models)
+- [Dashboard](#dashboard)
+- [Design Decisions](#design-decisions)
+- [Local Development](#local-development)
+- [Exploratory Notebooks](#exploratory-notebooks)
 
-TODO 4 - not important but nice to have (only if industry standard). Add a little section where you mention the /root/notebooks directory which is used for exploratory and dev coding
+---
 
-TODO 5 - read .env file. create example.env file, a file containing all env variable names without values, a file which is pushed to GIT. Also mention what to do with the example.env file in the setup section (the usual canonical way for a python project regarding .env file from sample.env file)
+## Problem Statement
 
-TODO 6 - under setup section add instruction to add a google cloud service account and to create an api key. the json file (api key) should be placed in the `dev` folder at the `project root`, e.g. `project-root/dev/credentials.json`. The dev directory name and the json file name should match the exact string in the example. This is related to actions done on the google cloud and also related to TODO 3, for terraform to be able to perform it's job.
+Citibike publishes monthly trip CSVs to a public S3 bucket. The raw data is useful but unwieldy — millions of rows spread across dozens of files, with no aggregation and no easy way to answer operational or customer-behaviour questions.
 
-TODO 7 - this project uses GCP. In setup add a step which sets GOOGLE_APPLICATION_CREDENTIALS , which points to the account service api key json file (related to TODO 3).
+This project builds a production-style pipeline that:
 
-TODO 8 - in setup section (control it), create a dev/ directory, create a json file named credentials.json, paste the contents of the account service json key. This is needed for airflow running in docker (simplest way for capstone project).
+- Reliably ingests and deduplicates raw trip files from S3 into GCS
+- Organises data in a BigQuery warehouse with a clear raw → staging → mart layer
+- Exposes five analytical mart tables, each built to answer a specific business question
+- Presents those answers in an interactive Streamlit dashboard
 
-TODO 9 - in airflow while running as a docker container, set an environment variable named GOOGLE_APPLICATION_CREDENTIALS with value  /opt/airflow/dev/credentials.json (check Dockerfile.airflow). This way airflow will use it to connect to GCP. (related to TODO 6, may be combined or reworked).
+---
 
-TODO 10 - refactor ingestion. See dev/refactor-ingestion.txt (not for AI).
+## Architecture
 
-TODO 11 - setup for dbt. edit dbt/citibike/profile.yml with correct project id for GCP.
+```
+Citibike S3 (public)
+        │
+        ▼
+  citibike_ingest.py   ── download ZIPs, extract CSVs ──▶  GCS bucket
+        │
+        ▼
+  citibike_load.py     ── load CSVs from GCS ────────────▶  BigQuery: de_citibike_raw.trips
+        │                                                    (partitioned by day on started_at)
+        ▼
+  dbt staging          ── clean + cast ──────────────────▶  de_citibike_staging.stg_trips
+        │
+        ▼
+  dbt marts            ── aggregate ────────────────────▶   de_citibike_marts.*
+        │
+        ▼
+  Streamlit dashboard  ── query marts directly ──────────▶  localhost:8501
+```
 
-TODO 12 - extract project from profile.yml to a env var GCP_PROJECT_ID. Use it in airflow.
+The full pipeline (ingest → load → dbt run → dbt test) is orchestrated by an Airflow DAG running inside Docker via LocalExecutor. A separate backfill DAG handles historical range reprocessing.
 
-NOTE AI - IMPORTANT - START EDITING BENEATH THIS POINT. LET THE ABOVE TEXT BE AVAILABLE FOR REFERENCE
+---
+
+## Tech Stack
+
+| Layer | Tool |
+|---|---|
+| Infrastructure | Terraform |
+| Cloud storage | Google Cloud Storage |
+| Data warehouse | BigQuery |
+| Ingestion & loading | Python 3.12 |
+| Orchestration | Apache Airflow 3.1.8 (Docker, LocalExecutor) |
+| Transformation | dbt-core 1.11.7 + dbt-bigquery 1.11.1 |
+| Dashboard | Streamlit + Plotly |
+| Dependency management | uv |
+| Containerisation | Docker + Docker Compose |
+
+---
+
+## Dataset
+
+**Source:** [Citibike System Data](https://citibikenyc.com/system-data) — publicly available on S3 at `s3://tripdata/`.
+
+Each monthly file contains one row per trip with fields including: ride ID, rideable type, start/end timestamps, start/end station name and coordinates, and member vs. casual rider type.
+
+The pipeline processes data per month and year, configurable at DAG trigger time. Supported range: **2024–2025**.
+
+---
+
+## Project Structure
+
+```
+project-root/
+├── airflow-home/               # Airflow runtime state (logs, config) — gitignored
+├── dags/                       # Airflow DAG definitions
+│   ├── citibike_elt_pipeline.py
+│   └── citibike_elt_backfill.py
+├── dbt/citibike/
+│   ├── models/
+│   │   ├── staging/            # stg_trips view
+│   │   └── marts/              # 5 mart tables
+│   └── dbt_project.yml
+├── dashboard/
+│   ├── app.py                  # Streamlit entry point
+│   ├── charts.py               # Plotly chart definitions
+│   └── data.py                 # BigQuery query helpers
+├── src/citibike/
+│   ├── ingest/citibike_ingest.py
+│   └── load/citibike_load.py
+├── terraform/
+│   └── variables.tf
+├── notebooks/                  # Exploratory work only — not part of the pipeline
+├── dev/                        # Gitignored — holds credentials.json locally
+├── Dockerfile.airflow
+├── Dockerfile.streamlit
+├── docker-compose.yml
+├── pyproject.toml
+├── uv.lock
+├── Makefile
+├── .env.docker                 # Committed — safe, no secrets
+└── sample.env                  # Template for local .env (committed)
+```
+
+---
+
+## Prerequisites
+
+Install the following before proceeding:
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose)
+- [Terraform](https://developer.hashicorp.com/terraform/install) ≥ 1.5
+- A [Google Cloud Platform](https://console.cloud.google.com/) account
+
+> **Windows users:** This project was developed on macOS/Linux. On Windows, run all commands inside [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) with Docker Desktop's WSL2 backend enabled.
+
+---
+
+## GCP Setup
+
+### 1. Create a GCP project
+
+Go to the [GCP Console](https://console.cloud.google.com/projectcreate) and create a new project. Note the **Project ID** — you will need it in the steps below.
+
+### 2. Enable required APIs
+
+Enable the following APIs in your project:
+
+- [Cloud Storage API](https://console.cloud.google.com/apis/library/storage.googleapis.com)
+- [BigQuery API](https://console.cloud.google.com/apis/library/bigquery.googleapis.com)
+- [IAM API](https://console.cloud.google.com/apis/library/iam.googleapis.com)
+
+### 3. Create a service account
+
+1. Go to **IAM & Admin → Service Accounts → Create Service Account**
+2. Give it a name (e.g., `de-citibike-sa`)
+3. Grant the following roles:
+
+   | Role | Purpose |
+   |---|---|
+   | Storage Admin | Create and write to the GCS bucket |
+   | BigQuery Data Editor | Read/write BigQuery tables |
+   | BigQuery Job User | Run BigQuery jobs |
+
+4. Click **Done**
+
+### 4. Download the credentials JSON
+
+1. Open the service account you just created
+2. Go to the **Keys** tab → **Add Key → Create new key → JSON**
+3. Download the file and place it at:
+
+   ```
+   dev/credentials.json
+   ```
+
+   This path is gitignored. Never commit this file.
+
+---
+
+## Infrastructure Setup (Terraform)
+
+Terraform provisions the GCS bucket and BigQuery datasets. Run this **once** before starting Docker.
+
+### Important: choose a unique bucket name
+
+GCS bucket names are **globally unique across all of Google Cloud** and **cannot contain underscores**. The default name in `terraform/variables.tf` (`de_citibike_bucket`) will fail on both counts — it likely already exists in someone else's project and contains an underscore.
+
+Use your GCP project ID as a prefix to guarantee uniqueness, for example:
+
+```
+your-project-id-citibike-bucket
+```
+
+### Add Terraform targets to the Makefile
+
+Add the following to your `Makefile`, replacing the placeholder values with your own:
+
+```makefile
+tf-init:
+	cd terraform && terraform init
+
+tf-apply:
+	cd terraform && terraform apply \
+		-var="project=your-project-id" \
+		-var="gcs_bucket_name=your-project-id-citibike-bucket"
+
+tf-destroy:
+	cd terraform && terraform destroy \
+		-var="project=your-project-id" \
+		-var="gcs_bucket_name=your-project-id-citibike-bucket"
+```
+
+> Passing `-var` overrides the defaults in `variables.tf` without modifying the file. The BigQuery dataset names (`de_citibike_raw`, `de_citibike_staging`, `de_citibike_marts`) are scoped to your GCP project and do not need to be changed.
+
+### Run Terraform
+
+```bash
+make tf-init
+make tf-apply
+```
+
+Review the plan and type `yes` to confirm. Terraform will create:
+
+- Your GCS bucket
+- BigQuery datasets: `de_citibike_raw`, `de_citibike_staging`, `de_citibike_marts`
+
+---
+
+## Local Setup
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/adiacov/de-zoomcamp-2026-capstone-project.git
+cd de-zoomcamp-2026-capstone-project
+```
+
+### 2. Create your local environment file
+
+```bash
+cp sample.env .env
+```
+
+Open `.env` and fill in your values:
+
+```dotenv
+##### GCP #####
+
+# Path to your local credentials JSON (relative to project root)
+GOOGLE_APPLICATION_CREDENTIALS=dev/credentials.json
+
+# Your GCP project ID
+GCP_PROJECT_ID=your-project-id
+
+##### AIRFLOW #####
+AIRFLOW_PROJ_DIR=./airflow-home
+AIRFLOW_UID=1000
+```
+
+This file is used for local development only. It is gitignored and never committed.
+
+### 3. Configure the Docker environment file
+
+Open `.env.docker` and set your GCP project ID:
+
+```dotenv
+##### GCP #####
+
+# Container path — do not change this
+GOOGLE_APPLICATION_CREDENTIALS=/opt/gcp/credentials.json
+
+# Your GCP project ID
+GCP_PROJECT_ID=your-project-id
+```
+
+`.env.docker` is committed to git. It contains no secrets — the credentials JSON is injected into containers via a Docker volume mount at `/opt/gcp/credentials.json` (read-only), so no secrets ever enter this file.
+
+### 4. Add Docker Compose targets to the Makefile
+
+For convenience, add the following to your `Makefile`:
+
+```makefile
+up:
+	docker compose up
+
+up-d:
+	docker compose up -d
+
+down:
+	docker compose down
+```
+
+---
+
+## Running the Pipeline
+
+### Start the full stack
+
+```bash
+docker compose up
+# or, after adding make targets above:
+make up
+```
+
+This starts:
+
+- **Airflow** webserver + scheduler — [localhost:8080](http://localhost:8080)
+- **Streamlit** dashboard — [localhost:8501](http://localhost:8501)
+
+Default Airflow login: `airflow` / `airflow`
+
+### Trigger a DAG run
+
+Both DAGs have `schedule=None` and must be triggered manually.
+
+1. Open [localhost:8080](http://localhost:8080) and log in
+2. Find the DAG you want to run (see [Airflow DAGs](#airflow-dags) below)
+3. Click the **▶ Trigger** button
+4. Set the parameters in the UI — at minimum, update `bucket` to match the bucket name you created in Terraform
+
+### Stop the stack
+
+```bash
+docker compose down
+# or:
+make down
+```
+
+---
+
+## Airflow DAGs
+
+### `citibike_elt_pipeline` — Standard ELT Pipeline
+
+Processes a single month of Citibike data end-to-end.
+
+**Task flow:**
+
+```
+run_ingest → run_load → should_run_dbt → create_dbt_models → run_dbt_tests
+```
+
+`should_run_dbt` is a short-circuit gate: if neither ingest nor load produced new data, the dbt steps are skipped entirely, avoiding unnecessary model rebuilds.
+
+**Parameters:**
+
+| Parameter | Default | Description |
+|---|---|---|
+| `year` | `2024` | Year to process (2024–2025) |
+| `month` | `1` | Month to process (1–12) |
+| `bucket` | `de_citibike_bucket` | Your GCS bucket name |
+| `dataset` | `de_citibike_raw` | Target BigQuery dataset |
+| `force_ingest` | `false` | If true, re-downloads and overwrites existing GCS files |
+
+---
+
+### `citibike_elt_backfill` — Backfill Pipeline
+
+Processes a range of months in a single run. Use this for historical loads, not regular monthly updates.
+
+**Task flow:**
+
+```
+generate_periods → run_ingest (mapped) → run_load (mapped) → create_dbt_models → run_dbt_tests
+```
+
+Ingest and load tasks are dynamically mapped — one task instance is created per month in the specified range.
+
+**Parameters:**
+
+| Parameter | Default | Description |
+|---|---|---|
+| `start_year` | `2024` | Start year of the backfill range |
+| `start_month` | `1` | Start month of the backfill range |
+| `end_year` | `2024` | End year of the backfill range |
+| `end_month` | `1` | End month of the backfill range |
+| `bucket` | `de_citibike_bucket` | Your GCS bucket name |
+| `dataset` | `de_citibike_raw` | Target BigQuery dataset |
+| `force_ingest` | `false` | If true, re-downloads and overwrites existing GCS files |
+
+---
+
+## dbt Models
+
+dbt models live in `dbt/citibike/models/`.
+
+### Staging
+
+| Model | Materialisation | Description |
+|---|---|---|
+| `stg_trips` | View | Cleans and casts raw trip data from `de_citibike_raw.trips`. 12 tests pass. |
+
+### Marts
+
+All marts are materialised as **tables** for dashboard query stability.
+
+| Model | Grain | Description |
+|---|---|---|
+| `mart_trips_by_hour` | date + hour + customer_type + rideable_type | Trip volume by time of day |
+| `mart_trips_by_day_type` | day_type + customer_type + rideable_type | Weekday vs. weekend patterns |
+| `mart_station_activity` | station_name + station_role | Top 10 start and end stations |
+| `mart_trips_by_month` | year + month + customer_type + rideable_type | Monthly trip volume trends |
+| `mart_avg_duration_by_customer` | customer_type + rideable_type | Average and median trip duration in minutes |
+
+---
+
+## Dashboard
+
+The Streamlit dashboard queries the mart tables directly from BigQuery using the same service account credentials.
+
+Open [localhost:8501](http://localhost:8501) after `docker compose up`. The pipeline must have completed at least one successful run before the dashboard has data to display.
+
+**Sections:**
+
+- **Overview** — total trips, rideable mix, monthly trends
+- **Operations** — hourly and day-type patterns, top station activity
+- **Customer Insights** — member vs. casual behaviour, trip duration distributions
+
+All charts are built with Plotly.
+
+---
+
+## Design Decisions
+
+**Marts as tables, not views.** Dashboard queries run against pre-aggregated tables so load time is consistent regardless of upstream data volume.
+
+**Median alongside average for trip duration.** `mart_avg_duration_by_customer` exposes both `avg_trip_duration_minutes` and `median_trip_duration_minutes`. For casual classic bike riders, the mean is 24.9 minutes but the median is 12.3 minutes — a gap large enough to mislead if only the average is shown. Both metrics are surfaced in the dashboard.
+
+**`_loaded_files` tracking table.** The load script records every GCS file it successfully processes into BigQuery. On subsequent runs, already-loaded files are skipped, making the pipeline safe to re-run without double-counting data.
+
+**Single `mart_station_activity` with a `station_role` column.** Rather than two separate marts (one for start stations, one for end stations), a single mart uses a `station_role` dimension (`start` / `end`). This halves the mart count and simplifies dashboard queries.
+
+**Isolated dbt virtualenv in `Dockerfile.airflow`.** dbt-core and Airflow share a dependency on `protobuf` but require incompatible versions. dbt runs inside its own Python virtualenv within the Airflow container, keeping the two dependency trees separate and avoiding import errors at runtime.
+
+**Short-circuit gate before dbt.** The standard ELT DAG includes a `should_run_dbt` task that skips dbt entirely if neither ingest nor load produced new data. This avoids unnecessary model rebuilds on re-runs where nothing changed.
+
+---
+
+## Local Development
+
+The Makefile exposes targets for running pipeline steps locally without Docker, using `uv`. These are useful for debugging individual steps outside of Airflow.
+
+```bash
+make ingest         # Run the ingest script locally (downloads ZIPs, uploads to GCS)
+make load           # Run the load script locally (loads GCS files into BigQuery)
+make streamlit-run  # Run the Streamlit dashboard locally
+```
+
+These use the values in your local `.env` file and the defaults hardcoded in each script. Check the script implementations for available arguments if you need to override the defaults.
+
+---
+
+## Exploratory Notebooks
+
+The `notebooks/` directory contains Jupyter notebooks used during development for data exploration, schema investigation, and prototype transformations. They are not part of the production pipeline and do not need to be run to reproduce the project results.
