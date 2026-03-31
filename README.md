@@ -23,6 +23,7 @@ An end-to-end data engineering project built for the [Data Engineering Zoomcamp 
 - [Design Decisions](#design-decisions)
 - [Local Development](#local-development)
 - [License](#license)
+- [Screenshots](#screenshots)
 
 ---
 
@@ -509,3 +510,41 @@ These use the credentials and project ID from your local `.env` file. Check the 
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+---
+
+## Screenshots
+
+### GCP
+
+**GCS Bucket**
+
+![GCS Bucket](./screenshots/gcp/de-citibike-bucket.png)
+
+**BigQuery Datasets**
+
+![BigQuery Datasets](./screenshots/gcp/de-citibike-dataset.png)
+
+### Airflow DAGs
+
+**ELT Pipeline DAG**
+
+![ELT Pipeline DAG](./screenshots/dags/citibike-elt-pipeline.png)
+
+**Backfill DAG**
+
+![Backfill DAG](./screenshots/dags/citibike-elt-backfill.png)
+
+### Dashboard
+
+**Overview**
+
+![Dashboard Overview](./screenshots/dashboard/overview.png)
+
+**Operations**
+
+![Dashboard Operations](./screenshots/dashboard/operations.png)
+
+**Customer Insights**
+
+![Dashboard Customer Insights](./screenshots/dashboard/insights.png)
