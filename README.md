@@ -11,6 +11,7 @@ An end-to-end data engineering project built for the [Data Engineering Zoomcamp 
 - [Tech Stack](#tech-stack)
 - [Dataset](#dataset)
 - [Project Structure](#project-structure)
+- [Quick Start](#quick-start)
 - [Prerequisites](#prerequisites)
 - [GCP Setup](#gcp-setup)
 - [Infrastructure Setup (Terraform)](#infrastructure-setup-terraform)
@@ -21,7 +22,6 @@ An end-to-end data engineering project built for the [Data Engineering Zoomcamp 
 - [Dashboard](#dashboard)
 - [Design Decisions](#design-decisions)
 - [Local Development](#local-development)
-- [Exploratory Notebooks](#exploratory-notebooks)
 
 ---
 
@@ -41,25 +41,47 @@ This project builds a production-style pipeline that:
 ## Architecture
 
 ```
-Citibike S3 (public)
-        │
-        ▼
-  citibike_ingest.py   ── download ZIPs, extract CSVs ──▶  GCS bucket
-        │
-        ▼
-  citibike_load.py     ── load CSVs from GCS ────────────▶  BigQuery: de_citibike_raw.trips
-        │                                                    (partitioned by day on started_at)
-        ▼
-  dbt staging          ── clean + cast ──────────────────▶  de_citibike_staging.stg_trips
-        │
-        ▼
-  dbt marts            ── aggregate ────────────────────▶   de_citibike_marts.*
-        │
-        ▼
-  Streamlit dashboard  ── query marts directly ──────────▶  localhost:8501
+┌──────────────────────────┐
+│   Citibike S3 (public)   │  monthly ZIP files
+└────────────┬─────────────┘
+             │
+             ▼
+┌──────────────────────────┐
+│         Ingest           │  ETag cache · per-file GCS dedup · parallel upload
+└────────────┬─────────────┘
+             │  CSV files
+             ▼
+┌──────────────────────────┐
+│       GCS Bucket         │  {prefix}_citibike_bucket
+└────────────┬─────────────┘
+             │
+             ▼
+┌──────────────────────────┐
+│          Load            │  _loaded_files tracking · temp table staging · retry
+└────────────┬─────────────┘
+             │  raw rows
+             ▼
+┌──────────────────────────┐
+│    BigQuery — Raw        │  {prefix}_citibike_raw · trips partitioned by started_at
+└────────────┬─────────────┘
+             │
+             ▼
+┌──────────────────────────┐
+│    dbt — Staging         │  {prefix}_citibike_staging · stg_trips view · 12 tests
+└────────────┬─────────────┘
+             │
+             ▼
+┌──────────────────────────┐
+│     dbt — Marts          │  {prefix}_citibike_marts · 5 aggregated tables
+└────────────┬─────────────┘
+             │
+             ▼
+┌──────────────────────────┐
+│       Dashboard          │  Streamlit + Plotly · localhost:8501
+└──────────────────────────┘
 ```
 
-The full pipeline (ingest → load → dbt run → dbt test) is orchestrated by an Airflow DAG running inside Docker via LocalExecutor. A separate backfill DAG handles historical range reprocessing.
+The full pipeline is orchestrated by Airflow (Docker, LocalExecutor). Two DAGs are provided: a single-month ELT pipeline and a multi-month backfill pipeline.
 
 ---
 
@@ -127,7 +149,64 @@ project-root/
 
 ---
 
-## Prerequisites
+## Quick Start
+
+A full walkthrough of each step is available in the sections below. This is the condensed version for reference.
+
+**1. Clone the repository**
+
+```bash
+git clone https://github.com/adiacov/de-zoomcamp-2026-capstone-project.git
+cd de-zoomcamp-2026-capstone-project
+```
+
+**2. Set up GCP** — create a project, enable APIs, create a service account with BigQuery Admin + Storage Admin roles, download the credentials JSON
+
+```
+dev/credentials.json   ← place the downloaded file here (gitignored)
+```
+
+→ Full instructions: [GCP Setup](#gcp-setup)
+
+**3. Configure Terraform** — open `terraform/variables.tf` and set your project ID and prefix
+
+```hcl
+variable "project" { default = "your-gcp-project-id" }   # ← your GCP project ID
+variable "prefix"  { default = "your-prefix" }            # ← unique prefix (e.g. your project ID)
+```
+
+**4. Provision infrastructure**
+
+```bash
+make tf-init
+make tf-apply
+```
+
+→ Full instructions: [Infrastructure Setup (Terraform)](#infrastructure-setup-terraform)
+
+**5. Configure environment files** — set `GCP_PROJECT_ID` and `GCP_PREFIX` in both files
+
+```bash
+cp sample.env .env   # then edit .env
+# also edit .env.docker
+```
+
+→ Full instructions: [Local Setup](#local-setup)
+
+**6. Build and start the stack**
+
+```bash
+make build   # once after cloning, and after any Dockerfile changes
+make up
+```
+
+**7. Trigger a DAG run** — open [localhost:8080](http://localhost:8080), log in (`airflow` / `airflow`), trigger a DAG, set parameters
+
+→ Full instructions: [Running the Pipeline](#running-the-pipeline)
+
+**8. View the dashboard** — open [localhost:8501](http://localhost:8501) after the first DAG run completes
+
+---
 
 Install the following before proceeding:
 
@@ -178,22 +257,32 @@ Enable the following APIs in your project:
 
 Terraform provisions the GCS bucket and BigQuery datasets. Run this **once** before starting Docker.
 
-### 1. Set your project ID and prefix in your `.env` files
+### 1. Set your project ID and prefix in `variables.tf`
 
-Before running Terraform, make sure `GCP_PROJECT_ID` and `GCP_PREFIX` are set in your `.env` file (see [Local Setup](#local-setup)). Terraform reads these values directly from your environment.
+Open `terraform/variables.tf` and update these two values:
+
+```hcl
+variable "project" {
+  description = "GCP project ID"
+  default     = "your-gcp-project-id"   # ← replace with your GCP project ID
+}
+
+variable "prefix" {
+  description = "Unique prefix for all GCP resource names"
+  default     = "your-prefix"           # ← replace with a unique value (e.g. your GCP project ID)
+}
+```
 
 `GCP_PREFIX` is used to construct all GCP resource names automatically:
 
 | Resource | Name |
 |---|---|
-| GCS bucket | `{GCP_PREFIX}-citibike-bucket` |
-| BigQuery dataset (raw) | `{GCP_PREFIX}_citibike_raw` |
-| BigQuery dataset (staging) | `{GCP_PREFIX}_citibike_staging` |
-| BigQuery dataset (marts) | `{GCP_PREFIX}_citibike_marts` |
+| GCS bucket | `{prefix}_citibike_bucket` |
+| BigQuery dataset (raw) | `{prefix}_citibike_raw` |
+| BigQuery dataset (staging) | `{prefix}_citibike_staging` |
+| BigQuery dataset (marts) | `{prefix}_citibike_marts` |
 
-> **Why a prefix?** GCS bucket names are globally unique across all of Google Cloud — a bucket named `citibike-bucket` almost certainly already exists in someone else's project. Prefixing with your GCP project ID or another unique identifier guarantees no collision. BigQuery dataset names are scoped to your project and don't have this problem, but the prefix is applied consistently everywhere for clarity.
-
-> **Note on bucket names:** GCS bucket names cannot contain underscores. The bucket name uses a hyphen (`-`) while BigQuery datasets use underscores (`_`). This is handled automatically in `variables.tf`.
+> **Why a prefix?** GCS bucket names are globally unique across all of Google Cloud — a bucket named `citibike_bucket` almost certainly already exists in someone else's project. Prefixing with your GCP project ID or another unique identifier guarantees no collision. BigQuery dataset names are scoped to your project and don't have this problem, but the prefix is applied consistently everywhere for clarity.
 
 ### 2. Provision infrastructure
 
@@ -210,14 +299,7 @@ Once Terraform completes, use the bucket name `{GCP_PREFIX}-citibike-bucket` whe
 
 ## Local Setup
 
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/adiacov/de-zoomcamp-2026-capstone-project.git
-cd de-zoomcamp-2026-capstone-project
-```
-
-### 2. Create your local environment file
+### 1. Create your local environment file
 
 ```bash
 cp sample.env .env
@@ -238,7 +320,7 @@ AIRFLOW_UID=1000
 
 This file is used for local development only (running scripts locally, Terraform). It is gitignored and never committed.
 
-### 3. Configure the Docker environment file
+### 2. Configure the Docker environment file
 
 Open `.env.docker` and fill in the two marked values:
 
@@ -313,8 +395,8 @@ run_ingest → run_load → should_run_dbt → install_dbt_deps → create_dbt_m
 |---|---|---|
 | `year` | `2024` | Year to process (2024–2025) |
 | `month` | `1` | Month to process (1–12) |
-| `bucket` | `de_citibike_bucket` | Your GCS bucket name (update this) |
-| `dataset` | `de_citibike_raw` | Target BigQuery dataset |
+| `bucket` | `{prefix}_citibike_bucket` | Your GCS bucket name — must match what Terraform created |
+| `dataset` | `{prefix}_citibike_raw` | Target BigQuery dataset |
 | `force_ingest` | `false` | If true, bypasses the ETag cache and re-validates GCS state |
 
 > **Start small.** Each monthly source file can exceed 200 MB. Run a single month first to verify the full pipeline works before processing more data.
@@ -341,8 +423,8 @@ Ingest and load tasks are dynamically mapped — one task instance is created pe
 | `start_month` | `1` | Start month of the backfill range |
 | `end_year` | `2024` | End year of the backfill range |
 | `end_month` | `1` | End month of the backfill range |
-| `bucket` | `de_citibike_bucket` | Your GCS bucket name (update this) |
-| `dataset` | `de_citibike_raw` | Target BigQuery dataset |
+| `bucket` | `{prefix}_citibike_bucket` | Your GCS bucket name — must match what Terraform created |
+| `dataset` | `{prefix}_citibike_raw` | Target BigQuery dataset |
 | `force_ingest` | `false` | If true, bypasses the ETag cache and re-validates GCS state |
 
 > **Data volume warning:** The backfill DAG processes all months in the range in parallel. A full year means 12 concurrent downloads (each 200 MB+) and 12 BigQuery load jobs. Start with a short range (2–3 months) to validate before running a full backfill.
@@ -357,7 +439,7 @@ dbt models live in `dbt/citibike/models/`.
 
 | Model | Materialisation | Description |
 |---|---|---|
-| `stg_trips` | View | Cleans and casts raw trip data from `de_citibike_raw.trips`. 12 tests pass. |
+| `stg_trips` | View | Cleans and casts raw trip data from `{prefix}_citibike_raw.trips`. 12 tests pass. |
 
 ### Marts
 
@@ -418,9 +500,3 @@ make streamlit-run  # Run the Streamlit dashboard locally
 ```
 
 These use the credentials and project ID from your local `.env` file. Check the script implementations in `src/citibike/` for available CLI arguments if you need to override the defaults (e.g., year, month, bucket, or `--force` for ingest).
-
----
-
-## Exploratory Notebooks
-
-The `notebooks/` directory contains Jupyter notebooks used during development for data exploration, schema investigation, and prototype transformations. They are not part of the production pipeline and do not need to be run to reproduce the project results.
