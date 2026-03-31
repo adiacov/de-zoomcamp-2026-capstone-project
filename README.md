@@ -22,6 +22,7 @@ An end-to-end data engineering project built for the [Data Engineering Zoomcamp 
 - [Dashboard](#dashboard)
 - [Design Decisions](#design-decisions)
 - [Local Development](#local-development)
+- [License](#license)
 
 ---
 
@@ -502,3 +503,9 @@ make streamlit-run  # Run the Streamlit dashboard locally
 ```
 
 These use the credentials and project ID from your local `.env` file. Check the script implementations in `src/citibike/` for available CLI arguments if you need to override the defaults (e.g., year, month, bucket, or `--force` for ingest).
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
