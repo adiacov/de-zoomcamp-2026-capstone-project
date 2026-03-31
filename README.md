@@ -1,6 +1,6 @@
-# Citibike NYC — End-to-End Data Pipeline
+# Citibike NYC - Batch ELT Platform
 
-An end-to-end data engineering project built for the [Data Engineering Zoomcamp 2026](https://github.com/DataTalksClub/data-engineering-zoomcamp). It ingests Citibike NYC trip data from the public S3 source, loads it into BigQuery, transforms it with dbt, orchestrates the pipeline with Airflow, and visualises the results in a Streamlit dashboard — all running in Docker.
+An end-to-end data engineering project built for the [Data Engineering Zoomcamp 2026](https://github.com/DataTalksClub/data-engineering-zoomcamp). It ingests Citibike NYC trip data from the public S3 source, loads it into BigQuery, transforms it with dbt, orchestrates the pipeline with Airflow, and visualises the results in a Streamlit dashboard - all running in Docker.
 
 ---
 
@@ -11,8 +11,8 @@ An end-to-end data engineering project built for the [Data Engineering Zoomcamp 
 - [Tech Stack](#tech-stack)
 - [Dataset](#dataset)
 - [Project Structure](#project-structure)
-- [Quick Start](#quick-start)
 - [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
 - [GCP Setup](#gcp-setup)
 - [Infrastructure Setup (Terraform)](#infrastructure-setup-terraform)
 - [Local Setup](#local-setup)
@@ -27,7 +27,7 @@ An end-to-end data engineering project built for the [Data Engineering Zoomcamp 
 
 ## Problem Statement
 
-Citibike publishes monthly trip CSVs to a public S3 bucket. The raw data is useful but unwieldy — millions of rows spread across dozens of files, with no aggregation and no easy way to answer operational or customer-behaviour questions.
+Citibike publishes monthly trip CSVs to a public S3 bucket. The raw data is useful but unwieldy - millions of rows spread across dozens of files, with no aggregation and no easy way to answer operational or customer-behaviour questions.
 
 This project builds a production-style pipeline that:
 
@@ -40,48 +40,48 @@ This project builds a production-style pipeline that:
 
 ## Architecture
 
-```
+```txt
 ┌──────────────────────────┐
-│   Citibike S3 (public)   │  monthly ZIP files
+│        Citibike S3       │  public dataset; published monthly;
 └────────────┬─────────────┘
-             │
+             │  ZIP files
              ▼
 ┌──────────────────────────┐
-│         Ingest           │  ETag cache · per-file GCS dedup · parallel upload
+│         Ingest           │  metadata driven; avoid duplicate download;
 └────────────┬─────────────┘
              │  CSV files
              ▼
 ┌──────────────────────────┐
-│       GCS Bucket         │  {prefix}_citibike_bucket
+│       GCS Bucket         │  files partitioned by year/month;
 └────────────┬─────────────┘
              │
              ▼
 ┌──────────────────────────┐
-│          Load            │  _loaded_files tracking · temp table staging · retry
+│          Load            │  metadata driven; file tracking; retry;
 └────────────┬─────────────┘
-             │  raw rows
+             │  Raw Data
              ▼
 ┌──────────────────────────┐
-│    BigQuery — Raw        │  {prefix}_citibike_raw · trips partitioned by started_at
+│    BigQuery - Raw        │  trips partitioned daily;
+└────────────┬─────────────┘
+             │  DBT (materialization: view)
+             ▼
+┌──────────────────────────┐
+│   BigQuery - Staging     │  cleansing; transformation;
+└────────────┬─────────────┘
+             │  DBT (materialization: table)
+             ▼
+┌──────────────────────────┐
+│   BigQuery - Marts       │  aggregations;
 └────────────┬─────────────┘
              │
              ▼
 ┌──────────────────────────┐
-│    dbt — Staging         │  {prefix}_citibike_staging · stg_trips view · 12 tests
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────────────────────┐
-│     dbt — Marts          │  {prefix}_citibike_marts · 5 aggregated tables
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────────────────────┐
-│       Dashboard          │  Streamlit + Plotly · localhost:8501
+│       Dashboard          │  Streamlit + Plotly
 └──────────────────────────┘
 ```
 
-The full pipeline is orchestrated by Airflow (Docker, LocalExecutor). Two DAGs are provided: a single-month ELT pipeline and a multi-month backfill pipeline.
+The full pipeline is orchestrated by Airflow. Two DAGs are provided: a single-month ELT pipeline and a multi-month backfill pipeline.
 
 ---
 
@@ -92,39 +92,39 @@ The full pipeline is orchestrated by Airflow (Docker, LocalExecutor). Two DAGs a
 | Infrastructure | Terraform |
 | Cloud storage | Google Cloud Storage |
 | Data warehouse | BigQuery |
-| Ingestion & loading | Python 3.12 |
-| Orchestration | Apache Airflow 3.1.8 (Docker, LocalExecutor) |
-| Transformation | dbt-core 1.11.7 + dbt-bigquery 1.11.1 |
+| Ingestion & loading | Python |
+| Orchestration | Apache Airflow |
+| Transformation | DBT |
 | Dashboard | Streamlit + Plotly |
 | Dependency management | uv |
-| Containerisation | Docker + Docker Compose |
+| Containerization | Docker |
 
 ---
 
 ## Dataset
 
-**Source:** [Citibike System Data](https://citibikenyc.com/system-data) — publicly available on S3 at `s3://tripdata/`.
+**Source:** [Citibike System Data](https://citibikenyc.com/system-data) - publicly available on S3 at `s3://tripdata/`.
 
 Each monthly file contains one row per trip with fields including: ride ID, rideable type, start/end timestamps, start/end station name and coordinates, and member vs. casual rider type.
 
 The pipeline processes data per month and year, configurable at DAG trigger time. Supported range: **2024–2025**.
 
-> **Data size warning:** Individual monthly source files can exceed 200 MB. Process one month at a time when getting started. Be especially careful with the backfill DAG — a full year triggers downloads and BigQuery loads for all 12 months simultaneously.
+> **Data size warning:** Individual monthly source files can exceed 200 MB. Process one month at a time when getting started. Be especially careful with the backfill DAG - a full year triggers downloads and BigQuery loads for all 12 months simultaneously.
 
 ---
 
 ## Project Structure
 
-```
+```txt
 project-root/
-├── airflow-home/               # Airflow runtime state (logs, config) — gitignored
-├── dags/                       # Airflow DAG definitions
+├── airflow-home/               # Airflow DAG definitions
+|   |── dags/
 │   ├── citibike_elt_pipeline.py
 │   └── citibike_elt_backfill.py
 ├── dbt/citibike/
 │   ├── models/
-│   │   ├── staging/            # stg_trips view
-│   │   └── marts/              # 5 mart tables
+│   │   ├── staging/            # staging views
+│   │   └── marts/              # mart tables
 │   └── dbt_project.yml
 ├── dashboard/
 │   ├── app.py                  # Streamlit entry point
@@ -134,18 +134,31 @@ project-root/
 │   ├── ingest/citibike_ingest.py
 │   └── load/citibike_load.py
 ├── terraform/
+|   ├── main.tf
 │   └── variables.tf
-├── notebooks/                  # Exploratory work only — not part of the pipeline
-├── dev/                        # Gitignored — holds credentials.json locally
+├── dev/                        # Gitignored - holds credentials.json
 ├── Dockerfile.airflow
 ├── Dockerfile.streamlit
 ├── docker-compose.yml
 ├── pyproject.toml
 ├── uv.lock
 ├── Makefile
-├── .env.docker                 # Committed — safe, no secrets
-└── sample.env                  # Template for local .env (committed)
+├── .env                        # Gitignored - local development
+├── .env.docker                 # Committed - safe, no secrets
+└── sample.env                  # Commited - template for local .env
 ```
+
+---
+
+## Prerequisites
+
+Install the following before proceeding:
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose)
+- [Terraform](https://developer.hashicorp.com/terraform/install) ≥ 1.5
+- A [Google Cloud Platform](https://console.cloud.google.com/) account
+
+> **Windows users:** This project was developed on macOS/Linux. On Windows, run all commands inside [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) with Docker Desktop's WSL2 backend enabled.
 
 ---
 
@@ -160,15 +173,15 @@ git clone https://github.com/adiacov/de-zoomcamp-2026-capstone-project.git
 cd de-zoomcamp-2026-capstone-project
 ```
 
-**2. Set up GCP** — create a project, enable APIs, create a service account with BigQuery Admin + Storage Admin roles, download the credentials JSON
+**2. Set up GCP** - create a project, enable APIs, create a service account with BigQuery Admin + Storage Admin roles, download the credentials JSON
 
 ```
 dev/credentials.json   ← place the downloaded file here (gitignored)
 ```
 
-→ Full instructions: [GCP Setup](#gcp-setup)
+> Note: Full instructions: [GCP Setup](#gcp-setup)
 
-**3. Configure Terraform** — open `terraform/variables.tf` and set your project ID and prefix
+**3. Configure Terraform** - open `terraform/variables.tf` and set your project ID and prefix
 
 ```hcl
 variable "project" { default = "your-gcp-project-id" }   # ← your GCP project ID
@@ -182,39 +195,28 @@ make tf-init
 make tf-apply
 ```
 
-→ Full instructions: [Infrastructure Setup (Terraform)](#infrastructure-setup-terraform)
+> Full instructions: [Infrastructure Setup (Terraform)](#infrastructure-setup-terraform)
 
-**5. Configure environment files** — set `GCP_PROJECT_ID` and `GCP_PREFIX` in both files
+**5. Configure environment files** - set `GCP_PROJECT_ID` and `GCP_PREFIX` in both files
 
 ```bash
-cp sample.env .env   # then edit .env
-# also edit .env.docker
+cp sample.env .env   # then edit .env; also edit .env.docker
 ```
 
-→ Full instructions: [Local Setup](#local-setup)
+> Full instructions: [Local Setup](#local-setup)
 
 **6. Build and start the stack**
 
 ```bash
-make build   # once after cloning, and after any Dockerfile changes
+make build   # once; it'l take some time
 make up
 ```
 
-**7. Trigger a DAG run** — open [localhost:8080](http://localhost:8080), log in (`airflow` / `airflow`), trigger a DAG, set parameters
+**7. Trigger a DAG run** - open [localhost:8080](http://localhost:8080), log in (`airflow` / `airflow`), trigger a DAG, set parameters
 
-→ Full instructions: [Running the Pipeline](#running-the-pipeline)
+> Full instructions: [Running the Pipeline](#running-the-pipeline)
 
-**8. View the dashboard** — open [localhost:8501](http://localhost:8501) after the first DAG run completes
-
----
-
-Install the following before proceeding:
-
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose)
-- [Terraform](https://developer.hashicorp.com/terraform/install) ≥ 1.5
-- A [Google Cloud Platform](https://console.cloud.google.com/) account
-
-> **Windows users:** This project was developed on macOS/Linux. On Windows, run all commands inside [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) with Docker Desktop's WSL2 backend enabled.
+**8. View the dashboard** - open [localhost:8501](http://localhost:8501) after the first DAG run completes
 
 ---
 
@@ -222,7 +224,7 @@ Install the following before proceeding:
 
 ### 1. Create a GCP project
 
-Go to the [GCP Console](https://console.cloud.google.com/projectcreate) and create a new project. Note the **Project ID** — you will need it throughout this setup.
+Go to the [GCP Console](https://console.cloud.google.com/projectcreate) and create a new project. Note the **Project ID** - you will need it throughout this setup.
 
 ### 2. Enable required APIs
 
@@ -282,7 +284,7 @@ variable "prefix" {
 | BigQuery dataset (staging) | `{prefix}_citibike_staging` |
 | BigQuery dataset (marts) | `{prefix}_citibike_marts` |
 
-> **Why a prefix?** GCS bucket names are globally unique across all of Google Cloud — a bucket named `citibike_bucket` almost certainly already exists in someone else's project. Prefixing with your GCP project ID or another unique identifier guarantees no collision. BigQuery dataset names are scoped to your project and don't have this problem, but the prefix is applied consistently everywhere for clarity.
+> **Why a prefix?** GCS bucket names are globally unique across all of Google Cloud - a bucket named `citibike_bucket` almost certainly already exists in someone else's project. Prefixing with your GCP project ID or another unique identifier guarantees no collision. BigQuery dataset names are scoped to your project and don't have this problem, but the prefix is applied consistently everywhere for clarity.
 
 ### 2. Provision infrastructure
 
@@ -326,7 +328,7 @@ Open `.env.docker` and fill in the two marked values:
 
 ```dotenv
 ##### GCP #####
-GOOGLE_APPLICATION_CREDENTIALS=/opt/gcp/credentials.json   # container path — do not change
+GOOGLE_APPLICATION_CREDENTIALS=/opt/gcp/credentials.json   # container path - do not change
 GCP_PROJECT_ID=<gcp project id>    # ← your GCP project ID
 GCP_PREFIX=<gcp prefix>            # ← same value as in .env
 ```
@@ -353,8 +355,8 @@ make up
 
 This starts:
 
-- **Airflow** webserver + scheduler — [localhost:8080](http://localhost:8080)
-- **Streamlit** dashboard — [localhost:8501](http://localhost:8501)
+- **Airflow** webserver + scheduler - [localhost:8080](http://localhost:8080)
+- **Streamlit** dashboard - [localhost:8501](http://localhost:8501)
 
 Default Airflow login: `airflow` / `airflow`
 
@@ -364,8 +366,8 @@ Both DAGs have `schedule=None` and must be triggered manually.
 
 1. Open [localhost:8080](http://localhost:8080) and log in
 2. Find the DAG you want to run (see [Airflow DAGs](#airflow-dags) below)
-3. Click the **▶ Trigger** button
-4. Set the parameters in the UI — at minimum, update `bucket` to match the bucket name created by Terraform
+3. Click the **Trigger** button
+4. Set the parameters in the UI - at minimum, update `bucket` to match the bucket name created by Terraform
 
 ### 4. Stop the stack
 
@@ -377,7 +379,7 @@ make down
 
 ## Airflow DAGs
 
-### `citibike_elt_pipeline` — Standard ELT Pipeline
+### `citibike_elt_pipeline` - Standard ELT Pipeline
 
 Processes a single month of Citibike data end-to-end.
 
@@ -387,7 +389,7 @@ Processes a single month of Citibike data end-to-end.
 run_ingest → run_load → should_run_dbt → install_dbt_deps → create_dbt_models → run_dbt_tests
 ```
 
-`should_run_dbt` is a short-circuit gate: if neither ingest nor load produced new data, the dbt steps (including `install_dbt_deps`) are skipped entirely.
+`should_run_dbt` is a short-circuit gate: if neither ingest nor load produced new data, the dbt steps are skipped entirely.
 
 **Parameters:**
 
@@ -395,7 +397,7 @@ run_ingest → run_load → should_run_dbt → install_dbt_deps → create_dbt_m
 |---|---|---|
 | `year` | `2024` | Year to process (2024–2025) |
 | `month` | `1` | Month to process (1–12) |
-| `bucket` | `{prefix}_citibike_bucket` | Your GCS bucket name — must match what Terraform created |
+| `bucket` | `{prefix}_citibike_bucket` | Your GCS bucket name - must match what Terraform created |
 | `dataset` | `{prefix}_citibike_raw` | Target BigQuery dataset |
 | `force_ingest` | `false` | If true, bypasses the ETag cache and re-validates GCS state |
 
@@ -403,7 +405,7 @@ run_ingest → run_load → should_run_dbt → install_dbt_deps → create_dbt_m
 
 ---
 
-### `citibike_elt_backfill` — Backfill Pipeline
+### `citibike_elt_backfill` - Backfill Pipeline
 
 Processes a range of months in a single run. Use this for historical loads, not for regular monthly updates.
 
@@ -413,7 +415,7 @@ Processes a range of months in a single run. Use this for historical loads, not 
 generate_periods → run_ingest (mapped) → run_load (mapped) → install_dbt_deps → create_dbt_models → run_dbt_tests
 ```
 
-Ingest and load tasks are dynamically mapped — one task instance is created per month in the specified range.
+Ingest and load tasks are dynamically mapped - one task instance is created per month in the specified range.
 
 **Parameters:**
 
@@ -423,11 +425,11 @@ Ingest and load tasks are dynamically mapped — one task instance is created pe
 | `start_month` | `1` | Start month of the backfill range |
 | `end_year` | `2024` | End year of the backfill range |
 | `end_month` | `1` | End month of the backfill range |
-| `bucket` | `{prefix}_citibike_bucket` | Your GCS bucket name — must match what Terraform created |
+| `bucket` | `{prefix}_citibike_bucket` | Your GCS bucket name - must match what Terraform created |
 | `dataset` | `{prefix}_citibike_raw` | Target BigQuery dataset |
 | `force_ingest` | `false` | If true, bypasses the ETag cache and re-validates GCS state |
 
-> **Data volume warning:** The backfill DAG processes all months in the range in parallel. A full year means 12 concurrent downloads (each 200 MB+) and 12 BigQuery load jobs. Start with a short range (2–3 months) to validate before running a full backfill.
+> **Data volume warning:** The backfill DAG processes all months in the range in parallel. A full year means 12 concurrent downloads (each 200 MB+) and 12 BigQuery load jobs. Start with a short range (2-3 months) to validate before running a full backfill.
 
 ---
 
@@ -439,7 +441,7 @@ dbt models live in `dbt/citibike/models/`.
 
 | Model | Materialisation | Description |
 |---|---|---|
-| `stg_trips` | View | Cleans and casts raw trip data from `{prefix}_citibike_raw.trips`. 12 tests pass. |
+| `stg_trips` | View | Cleans and casts raw trip data from `{prefix}_citibike_raw.trips` |
 
 ### Marts
 
@@ -459,13 +461,13 @@ All marts are materialised as **tables** for dashboard query stability.
 
 The Streamlit dashboard queries the mart tables directly from BigQuery using the same service account credentials.
 
-Open [localhost:8501](http://localhost:8501) after `make up`. The pipeline must have completed at least one successful run before the dashboard has data to display.
+Open [localhost:8501](http://localhost:8501). The pipeline must have completed at least one successful run before the dashboard has data to display.
 
 **Sections:**
 
-- **Overview** — total trips, rideable mix, monthly trends
-- **Operations** — hourly and day-type patterns, top station activity
-- **Customer Insights** — member vs. casual behaviour, trip duration distributions
+- **Overview** - total trips, rideable mix, monthly trends
+- **Operations** - hourly and day-type patterns, top station activity
+- **Customer Insights** - member vs. casual behaviour, trip duration distributions
 
 All charts are built with Plotly.
 
@@ -473,7 +475,7 @@ All charts are built with Plotly.
 
 ## Design Decisions
 
-**ETag-based ingest caching.** The ingest script performs a single cheap HTTP HEAD request to check the remote file's ETag before doing anything else. If the ETag matches the local cache (`.ingestion_cache.json`), the entire download is skipped. If the ETag has changed — or if no cache exists — the script downloads the ZIP and uploads only the inner CSV files that are missing or have a different size in GCS. This means re-running ingest for a month you've already processed costs almost nothing. The `force_ingest` parameter bypasses the ETag check while still applying the per-file GCS size check, making it safe to use for repair without wasting bandwidth.
+**ETag-based ingest caching.** The ingest script performs a single cheap HTTP HEAD request to check the remote file's ETag before doing anything else. If the ETag matches the local cache (`.ingestion_cache.json`), the entire download is skipped. If the ETag has changed - or if no cache exists - the script downloads the ZIP and uploads only the inner CSV files that are missing or have a different size in GCS. This means re-running ingest for a month you've already processed costs almost nothing. The `force_ingest` parameter bypasses the ETag check while still applying the per-file GCS size check, making it safe to use for repair without wasting bandwidth.
 
 **`_loaded_files` tracking table.** The load script maintains a `_loaded_files` metadata table in BigQuery that records every GCS URI it has successfully loaded. On subsequent runs, already-loaded files are skipped before any BigQuery jobs are started, preventing double-counting in the raw table.
 
@@ -481,7 +483,7 @@ All charts are built with Plotly.
 
 **Marts as tables, not views.** Dashboard queries run against pre-aggregated tables so load time is consistent regardless of upstream data volume.
 
-**Median alongside average for trip duration.** `mart_avg_duration_by_customer` exposes both `avg_trip_duration_minutes` and `median_trip_duration_minutes`. For casual classic bike riders, the mean is 24.9 minutes but the median is 12.3 minutes — a gap large enough to mislead if only the average is shown. Both metrics are surfaced in the dashboard.
+**Median alongside average for trip duration.** `mart_avg_duration_by_customer` exposes both `avg_trip_duration_minutes` and `median_trip_duration_minutes`. For casual classic bike riders, the mean is 24.9 minutes but the median is 12.3 minutes - a gap large enough to mislead if only the average is shown. Both metrics are surfaced in the dashboard.
 
 **Single `mart_station_activity` with a `station_role` column.** Rather than two separate marts (one for start stations, one for end stations), a single mart uses a `station_role` dimension (`start` / `end`). This halves the mart count and simplifies dashboard queries.
 
